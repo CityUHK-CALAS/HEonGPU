@@ -53,13 +53,13 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_FullPacking)
         context.set_poly_modulus_degree(poly_modulus_degree);
 
         context.set_coeff_modulus_bit_sizes(
-            {60, 40, 56, 56, 56, 56},  // Q moduli
+            {60, 45, 45, 45, 45, 45},  // Q moduli
             {60, 60});          // P moduli
         context.generate();
 
         heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
         heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
-        keygen.generate_secret_key(secret_key);
+        keygen.generate_secret_key_v2(secret_key);
 
         heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
         keygen.generate_public_key(public_key, secret_key);
@@ -70,15 +70,15 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_FullPacking)
         heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
 
         const int slot_count = poly_modulus_degree / 2;
-        double scale = pow(2.0, 40);
+        double scale = pow(2.0, 45);
 
-        // Generate bootstrapping parameters for CoeffsToSlots
-        heongpu::BootstrappingConfig boot_config(
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::SlotsToCoeffs, 0),
-            heongpu::EvalModConfig(0),  // Not using eval_mod in this test
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::CoeffsToSlots, 5)
+        double cts_scaling = 1.0 / (2 * slot_count);
+        heongpu::BootstrappingConfigV2 boot_config(
+            heongpu::EncodingMatrixConfig(),
+            heongpu::EvalModConfig(),
+            heongpu::EncodingMatrixConfig(heongpu::LinearTransformType::COEFFS_TO_SLOTS, 5, 2.0, 4, cts_scaling)
         );
-        operators.generate_bootstrapping_params(scale, boot_config);
+        operators.generate_bootstrapping_params_v2(scale, boot_config);
 
         std::vector<int> key_index = operators.bootstrapping_key_indexs();
         heongpu::Galoiskey<heongpu::Scheme::CKKS> galois_key(context, key_index);
@@ -126,7 +126,7 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_FullPacking)
         // Apply homomorphic CoeffsToSlots (DFT)
         heongpu::ExecutionOptions options;
         std::vector<heongpu::Ciphertext<heongpu::Scheme::CKKS>> result_cts =
-            operators.coeff_to_slot_cf(ciphertext, galois_key, options);
+            operators.coeff_to_slot_v2(ciphertext, galois_key, options);
 
         std::cout << "\n=== CoeffsToSlots returned " << result_cts.size() << " ciphertexts ===" << std::endl;
 
@@ -257,7 +257,7 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_FullPacking)
 
         heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
         heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
-        keygen.generate_secret_key(secret_key);
+        keygen.generate_secret_key_v2(secret_key);
 
         heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
         keygen.generate_public_key(public_key, secret_key);
@@ -271,12 +271,12 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_FullPacking)
         double scale = pow(2.0, 40);
 
         // Generate bootstrapping parameters for SlotsToCoeffs
-        heongpu::BootstrappingConfig boot_config(
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::SlotsToCoeffs, 4),
-            heongpu::EvalModConfig(0),  // Not using eval_mod in this test
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::CoeffsToSlots, 0)
+        heongpu::BootstrappingConfigV2 boot_config(
+            heongpu::EncodingMatrixConfig(heongpu::LinearTransformType::SLOTS_TO_COEFFS, 4, 2.0, 3, 1.0),
+            heongpu::EvalModConfig(),  // Not using eval_mod in this test
+            heongpu::EncodingMatrixConfig()
         );
-        operators.generate_bootstrapping_params(scale, boot_config);
+        operators.generate_bootstrapping_params_v2(scale, boot_config);
 
         std::vector<int> key_index = operators.bootstrapping_key_indexs();
         heongpu::Galoiskey<heongpu::Scheme::CKKS> galois_key(context, key_index);
@@ -306,7 +306,7 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_FullPacking)
         // Apply homomorphic SlotsToCoeffs (inverse DFT)
         heongpu::ExecutionOptions options;
         heongpu::Ciphertext<heongpu::Scheme::CKKS> result =
-            operators.slot_to_coeff_cf(ct_real, ct_imag, galois_key, options);
+            operators.slot_to_coeff_v2(ct_real, ct_imag, galois_key, options);
        
         heongpu::Plaintext<heongpu::Scheme::CKKS> result_pt(context);
         decryptor.decrypt(result_pt, result);

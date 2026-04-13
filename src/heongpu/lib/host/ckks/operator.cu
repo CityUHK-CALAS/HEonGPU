@@ -3295,9 +3295,9 @@ namespace heongpu
                 }
             }
 
-            double scale = 
-                static_cast<double>(prime_vector_[current_decomp_count].value);
-            
+            double scale =
+                static_cast<double>(prime_vector_[current_decomp_count-1].value);
+
             result.scale_ = result.scale_ * scale;
             result.rescale_required_ = true;
             rescale_inplace(result, options);
@@ -6187,18 +6187,31 @@ namespace heongpu
         CtoS_Scaling_ = CtoS_Scaling;
         StoC_Scaling_ = StoC_Scaling;
 
-        generate_E_diagonals_index_cf();
-        generate_E_inv_diagonals_index_cf();
-        split_E_cf();
-        split_E_inv_cf();
+        if (StoC_piece_ > 0)
+        {
+            generate_E_diagonals_index_cf();
+            split_E_cf();
+            generate_E_diagonals_cf();
+        }
 
-        generate_E_diagonals_cf();
-        generate_E_inv_diagonals_cf();
+        if (CtoS_piece_ > 0)
+        {
+            generate_E_inv_diagonals_index_cf();
+            split_E_inv_cf();
+            generate_E_inv_diagonals_cf();
+        }
 
         generate_V_n_lists_cf(CtoS_bsgs_ratio, StoC_bsgs_ratio);
 
-        generate_pre_comp_V_cf();
-        generate_pre_comp_V_inv_cf();
+        if (StoC_piece_ > 0)
+        {
+            generate_pre_comp_V_cf();
+        }
+
+        if (CtoS_piece_ > 0)
+        {
+            generate_pre_comp_V_inv_cf();
+        }
 
         generate_key_indexs_cf();
         key_indexs_ = unique_sort(key_indexs_);
@@ -7089,74 +7102,94 @@ namespace heongpu
             stc_config_ = config.stc_config_;
             eval_mod_config_ = config.eval_mod_config_;
 
-            // Set Q if not already set in config
-            if (eval_mod_config_.Q_ == 0) 
+            if (eval_mod_config_.level_start_ != -1)
             {
-                eval_mod_config_.Q_ = prime_vector_[0].value;
-            }
-            // Set scaling_factor based on Q0's bit length
-            if (eval_mod_config_.scaling_factor_ == 0.0) 
-            {
-                int bit_length = calculate_bit_count(
-                    prime_vector_[eval_mod_config_.level_start_].value);
-                eval_mod_config_.scaling_factor_ =
-                    static_cast<double>(1ULL << bit_length);
+                // Set Q if not already set in config
+                if (eval_mod_config_.Q_ == 0)
+                {
+                    eval_mod_config_.Q_ = prime_vector_[0].value;
+                }
+                // Set scaling_factor based on Q0's bit length
+                if (eval_mod_config_.scaling_factor_ == 0.0)
+                {
+                    int bit_length = calculate_bit_count(
+                        prime_vector_[eval_mod_config_.level_start_].value);
+                    eval_mod_config_.scaling_factor_ =
+                        static_cast<double>(1ULL << bit_length);
+                }
+
+                eval_mod_config_.q_diff_ =
+                    static_cast<double>(eval_mod_config_.Q_) /
+                    std::pow(2.0, std::round(std::log2(
+                                      static_cast<double>(eval_mod_config_.Q_))));
+                eval_mod_config_.sqrt2pi_ =
+                    std::pow(eval_mod_config_.q_diff_ / (2.0 * M_PI),
+                             1.0 / std::pow(2.0, eval_mod_config_.double_angle_));
+
+                sine_poly_ = generate_eval_mod_poly(eval_mod_config_,
+                                                    eval_mod_config_.sine_deg_);
+
+                if (eval_mod_config_.sine_type_ == SineType::COS1)
+                {
+                    for (int i = 0; i < sine_poly_.coeffs_.size(); i++)
+                    {
+                        sine_poly_.coeffs_[i] =
+                            sine_poly_.coeffs_[i] *
+                            Complex64(eval_mod_config_.sqrt2pi_, 0.0);
+                    }
+                }
             }
 
-            eval_mod_config_.q_diff_ = 
-                static_cast<double>(eval_mod_config_.Q_) / 
-                std::pow(2.0, std::round(std::log2(
-                                  static_cast<double>(eval_mod_config_.Q_))));
-            eval_mod_config_.sqrt2pi_ =
-                std::pow(eval_mod_config_.q_diff_ / (2.0 * M_PI),
-                         1.0 / std::pow(2.0, eval_mod_config_.double_angle_));
-            
             // double CtoS_Scaling =
             //     0.5 / (double(eval_mod_config_.K_) * eval_mod_config_.q_diff_); // @company CipherFlow
-            double CtoS_Scaling = 1.0
-                /(double(eval_mod_config_.K_)*double(n)*eval_mod_config_.q_diff_); // @company CipherFlow
-            double StoC_Scaling =
-                scale_boot_ / (eval_mod_config_.scaling_factor_ /
-                               eval_mod_config_.message_ratio_);
 
-            VandermondeCF matrix_gen(n, CtoS_piece_, StoC_piece_, CtoS_Scaling, 
-                                     StoC_Scaling, cts_config_.bsgs_ratio_, 
-                                     stc_config_.bsgs_ratio_);  // @company CipherFlow
-
-            V_matrixs_rotated_encoded_ =
-                encode_V_matrixs(matrix_gen, stc_config_.level_start_);  // @company CipherFlow
-            V_inv_matrixs_rotated_encoded_ =
-                encode_V_inv_matrixs(matrix_gen, cts_config_.level_start_);  // @company CipherFlow
-            
-            V_matrixs_index_ = matrix_gen.V_matrixs_index_;
-            V_inv_matrixs_index_ = matrix_gen.V_inv_matrixs_index_;
-
-            diags_matrices_bsgs_ = matrix_gen.diags_matrices_bsgs_;
-            diags_matrices_inv_bsgs_ = matrix_gen.diags_matrices_inv_bsgs_;
-
-            diags_matrices_bsgs_rot_n1_ =
-                matrix_gen.diags_matrices_bsgs_rot_n1_;
-            diags_matrices_inv_bsgs_rot_n1_ =
-                matrix_gen.diags_matrices_inv_bsgs_rot_n1_;
-
-            diags_matrices_bsgs_rot_n2_ =
-                matrix_gen.diags_matrices_bsgs_rot_n2_;
-            diags_matrices_inv_bsgs_rot_n2_ =
-                matrix_gen.diags_matrices_inv_bsgs_rot_n2_;
-
-            key_indexs_ = matrix_gen.key_indexs_;
-
-            sine_poly_ = generate_eval_mod_poly(eval_mod_config_,
-                                                eval_mod_config_.sine_deg_);
-
-            if (eval_mod_config_.sine_type_ == SineType::COS1)
+            if (cts_config_.level_start_ != -1 || stc_config_.level_start_ != -1)
             {
-                for (int i = 0; i < sine_poly_.coeffs_.size(); i++)
+                double CtoS_Scaling = 0.0;
+                if (cts_config_.level_start_ != -1)
                 {
-                    sine_poly_.coeffs_[i] =
-                        sine_poly_.coeffs_[i] *
-                        Complex64(eval_mod_config_.sqrt2pi_, 0.0);
+                    CtoS_Scaling = (cts_config_.scaling_ == 0.0)
+                        ? 1.0 / (double(eval_mod_config_.K_) * double(n) * eval_mod_config_.q_diff_)
+                        : cts_config_.scaling_; // @company CipherFlow
                 }
+
+                double StoC_Scaling = 0.0;
+                if (stc_config_.level_start_ != -1)
+                {
+                    StoC_Scaling = (stc_config_.scaling_ == 0.0)
+                        ? scale_boot_ / (eval_mod_config_.scaling_factor_ /
+                                         eval_mod_config_.message_ratio_)
+                        : stc_config_.scaling_;
+                }
+
+                VandermondeCF matrix_gen(n,
+                                         cts_config_.level_start_ != -1 ? CtoS_piece_ : 0,
+                                         stc_config_.level_start_ != -1 ? StoC_piece_ : 0,
+                                         CtoS_Scaling, StoC_Scaling,
+                                         cts_config_.bsgs_ratio_,
+                                         stc_config_.bsgs_ratio_);  // @company CipherFlow
+
+                if (stc_config_.level_start_ != -1)
+                {
+                    V_matrixs_rotated_encoded_ =
+                        encode_V_matrixs(matrix_gen, stc_config_.level_start_);  // @company CipherFlow
+                    V_matrixs_index_ = matrix_gen.V_matrixs_index_;
+                    diags_matrices_bsgs_ = matrix_gen.diags_matrices_bsgs_;
+                    diags_matrices_bsgs_rot_n1_ = matrix_gen.diags_matrices_bsgs_rot_n1_;
+                    diags_matrices_bsgs_rot_n2_ = matrix_gen.diags_matrices_bsgs_rot_n2_;
+                }
+
+                if (cts_config_.level_start_ != -1)
+                {
+                    V_inv_matrixs_rotated_encoded_ =
+                        encode_V_inv_matrixs(matrix_gen, cts_config_.level_start_);  // @company CipherFlow
+                    V_inv_matrixs_index_ = matrix_gen.V_inv_matrixs_index_;
+                    diags_matrices_inv_bsgs_ = matrix_gen.diags_matrices_inv_bsgs_;
+                    diags_matrices_inv_bsgs_rot_n1_ = matrix_gen.diags_matrices_inv_bsgs_rot_n1_;
+                    diags_matrices_inv_bsgs_rot_n2_ = matrix_gen.diags_matrices_inv_bsgs_rot_n2_;
+                }
+
+                key_indexs_ = matrix_gen.key_indexs_;
             }
 
             boot_context_generated_ = true;

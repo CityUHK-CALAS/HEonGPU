@@ -110,14 +110,14 @@ int main(int argc, char* argv[])
     heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context);
     encryptor.encrypt(C1, P1);
 
-    heongpu::EvalModConfig eval_mod_config(20);
-   
+    heongpu::EvalModConfig eval_mod_config(context.get_key_modulus()[0].value, 20, 256.0, 16, 30, 3, 0, pow(2.0, 60));
+
     heongpu::BootstrappingConfigV2 boot_config(
         heongpu::EncodingMatrixConfig(
-            heongpu::LinearTransformType::SLOTS_TO_COEFFS, 12),
+            heongpu::LinearTransformType::SLOTS_TO_COEFFS, 12, 2.0, 3),
         eval_mod_config,
         heongpu::EncodingMatrixConfig(
-            heongpu::LinearTransformType::COEFFS_TO_SLOTS, 24));
+            heongpu::LinearTransformType::COEFFS_TO_SLOTS, 24, 2.0, 4));
 
     operators.generate_bootstrapping_params_v2(scale, boot_config);
 

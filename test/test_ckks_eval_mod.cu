@@ -23,14 +23,6 @@ TEST(HEonGPU, CKKS_EvalMod)
         context.set_poly_modulus_degree(poly_modulus_degree);
 
         // Modulus configuration matching the example
-        // context.set_coeff_modulus_bit_sizes(
-        // {55,
-        //     45,
-        //     60, 60, 60, 60,
-        //     60, 60, 60, 60,
-        //     53
-        //     },
-        // {60, 60, 60});
         context.set_coeff_modulus_bit_sizes(
         {60, 40, 40, 40, 40, 40, 40, 40, 40, 40, //lv9
             39, 39, 39,  // stc
@@ -41,7 +33,7 @@ TEST(HEonGPU, CKKS_EvalMod)
 
         heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
         heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
-        keygen.generate_secret_key(secret_key);
+        keygen.generate_secret_key_v2(secret_key);
 
         heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
         keygen.generate_public_key(public_key, secret_key);
@@ -62,12 +54,12 @@ TEST(HEonGPU, CKKS_EvalMod)
 
         heongpu::EvalModConfig eval_mod_config(context.get_key_modulus()[0].value, 20, 256.0, 16, 30, 3, 0, pow(2.0, 60));
 
-        heongpu::BootstrappingConfig boot_config(
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::CoeffsToSlots, 0),
+        heongpu::BootstrappingConfigV2 boot_config(
+            heongpu::EncodingMatrixConfig(),
             eval_mod_config,
-            heongpu::EncodingMatrixConfig(heongpu::Linear_Transform_Type::SlotsToCoeffs, 0)
+            heongpu::EncodingMatrixConfig()
         );
-        operators.generate_bootstrapping_params(scale, boot_config);
+        operators.generate_bootstrapping_params_v2(scale, boot_config);
 
         const int slot_count = poly_modulus_degree / 2;
 
@@ -111,7 +103,7 @@ TEST(HEonGPU, CKKS_EvalMod)
         
         std::cout << "const1 " << const1 << std::endl;
         // Perform eval_mod
-        operators.mult_const(C1, const1, C1, options);
+        operators.multiply_plain_v2(C1, const1, C1, options);
         operators.rescale_inplace(C1, options);
 
         heongpu::Ciphertext<heongpu::Scheme::CKKS> result =
