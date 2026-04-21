@@ -200,7 +200,7 @@ int main(int argc, char* argv[])
 
     cudaDeviceSynchronize();
 
-    // Sparse packing: slot_count = N/4, gap = 2
+    // Sparse packing: slot_count = N/8, gap = 4
     run_bootstrapping(poly_modulus_degree, poly_modulus_degree / 8,
                       "Sparse Packing Bootstrapping");
 
