@@ -112,7 +112,7 @@ namespace heongpu
         }
     }
 
-    __global__ void E_diagonal_generate_kernel_cf(Complex64* output, int n_power)
+    __global__ void E_diagonal_generate_kernel_cf(Complex64* output, int n_power, int log_dslots)
     {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         int block_y = blockIdx.y; // matrix index
@@ -122,7 +122,9 @@ namespace heongpu
         int n = 1 << n_power;
         int v_size = 1 << (n_power - logk);
 
-        int index1 = idx & ((v_size << 1) - 1);
+        int idx_eff = idx & (n - 1);
+
+        int index1 = idx_eff & ((v_size << 1) - 1);
         int index2 = index1 >> (n_power - logk);
         Complex64 W1(1.0, 0.0);
         Complex64 W2(0.0, 0.0);
@@ -147,8 +149,8 @@ namespace heongpu
                 W2 = W;
             }
 
-            output[(output_location << n_power) + idx] = W1;
-            output[((output_location + 1) << n_power) + idx] = W2;
+            output[(output_location << log_dslots) + idx] = W1;
+            output[((output_location + 1) << log_dslots) + idx] = W2;
         }
         else
         {
@@ -169,9 +171,9 @@ namespace heongpu
                 W2 = W;
             }
 
-            output[(output_location << n_power) + idx] = W1;
-            output[((output_location + 1) << n_power) + idx] = W2;
-            output[((output_location + 2) << n_power) + idx] = W3;
+            output[(output_location << log_dslots) + idx] = W1;
+            output[((output_location + 1) << log_dslots) + idx] = W2;
+            output[((output_location + 2) << log_dslots) + idx] = W3;
         }
     }
 
@@ -232,17 +234,22 @@ namespace heongpu
      * @company CipherFlow
      */
     __global__ void E_diagonal_inverse_generate_kernel_cf(Complex64* output,
-                                                               int n_power)
+                                                          int n_power,
+                                                          int log_dslots)
     {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        int block_y = blockIdx.y; // matrix index
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; // [0, dslots)
+        int block_y = blockIdx.y; // butterfly stage index
         int logk = block_y + 1;
         int output_location = matrix_location(block_y);
 
-        int n = 1 << n_power;
+        int n = 1 << n_power;       // num_slots
         int v_size = 1 << (n_power - logk);
 
-        int index1 = idx & ((v_size << 1) - 1);
+        // Use within-half index for butterfly arithmetic so both halves get the
+        // same twiddle factor.
+        int idx_eff = idx & (n - 1);
+
+        int index1 = idx_eff & ((v_size << 1) - 1);
         int index2 = index1 >> (n_power - logk);
         Complex64 W1(1.0, 0.0);
         Complex64 W2(1.0, 0.0);
@@ -259,10 +266,10 @@ namespace heongpu
                 W1 = omega_4n.inverse();
                 W1 = W1.exp(expo);
                 W2 = W1.negate();
-            } 
+            }
 
-            output[(output_location << n_power) + idx] = W1;
-            output[((output_location + 1) << n_power) + idx] = W2;
+            output[(output_location << log_dslots) + idx] = W1;
+            output[((output_location + 1) << log_dslots) + idx] = W2;
         }
         else
         {
@@ -278,9 +285,9 @@ namespace heongpu
                 W3 = W1.negate();
             }
 
-            output[(output_location << n_power) + idx] = W1;
-            output[((output_location + 1) << n_power) + idx] = W2;
-            output[((output_location + 2) << n_power) + idx] = W3;
+            output[(output_location << log_dslots) + idx] = W1;
+            output[((output_location + 1) << log_dslots) + idx] = W2;
+            output[((output_location + 2) << log_dslots) + idx] = W3;
         }
     }
 
@@ -377,11 +384,14 @@ namespace heongpu
         Complex64* input, Complex64* output, Complex64* temp, int* diag_index,
         int* input_index, int* output_index, int iteration_count,
         int R_matrix_counter, int output_index_counter, int mul_index,
-        bool first, bool last, int n_power)
+        bool first, bool last, int n_power, int log_dslots, int rot_mod,
+        bool repack_imag_to_real)
     {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; // [0, dslots)
 
-        int L_matrix_loc_ = 3 + 3 * (mul_index-1);
+        int n         = 1 << n_power;
+
+        int L_matrix_loc_ = 3 + 3 * (mul_index - 1);
         int L_matrix_size = (last) ? 2 : 3;
 
         int R_matrix_counter_ = R_matrix_counter;
@@ -389,31 +399,61 @@ namespace heongpu
         int iter_R_m = iteration_count;
         if (first)
         {
-            for (int i = 0; i < iter_R_m; i++)
-            {
-                Complex64 R_m = input[idx + (i << n_power)];
-                int output_location = output_index[output_index_counter_];
-                output[(output_location << n_power) + idx] = R_m;
-                output_index_counter_++;
+            if (repack_imag_to_real) {
+                for (int i = 0; i < 2; i++)
+                {
+                    for (int j = 0; j < L_matrix_size; j++)
+                    {
+                        int diag_index_ = 0;
+                        if (j == 1) {
+                            diag_index_ = 1;
+                        } else if (j == 2) {
+                            diag_index_ = n-1;
+                        }
+                        int rot_idx = (idx + diag_index_) & (rot_mod - 1);
+
+                        Complex64 R_m = (i == 0)
+                            ? ((rot_idx < n) ? Complex64(1.0, 0.0) : Complex64(0.0, 1.0))
+                            : ((rot_idx < n) ? Complex64(0.0, 1.0) : Complex64(1.0, 0.0));
+
+                        Complex64 L_m = input[idx + (j << log_dslots)];
+                        int output_location = output_index[output_index_counter_];
+                        Complex64 res = output[(output_location << log_dslots) + idx];
+                        res = res + (L_m * R_m);
+                        output[(output_location << log_dslots) + idx] = res;
+                        output_index_counter_++;
+                    }
+                }
+
+            } else {
+                for (int i = 0; i < iter_R_m; i++)
+                {
+                    Complex64 R_m = input[idx + (i << log_dslots)];
+                    int output_location = output_index[output_index_counter_];
+                    output[(output_location << log_dslots) + idx] = R_m;
+                    output_index_counter_++;
+                }
             }
         }
         else
         {
             for (int i = 0; i < iter_R_m; i++)
             {
-                int input_loc_idx = input_index[R_matrix_counter_ - 3 + i];
+                int input_loc_idx = input_index[repack_imag_to_real?R_matrix_counter_-6 + i : R_matrix_counter_ - 3 + i];
 
                 for (int j = 0; j < L_matrix_size; j++)
                 {
-                    int diag_index_ = diag_index[L_matrix_loc_ + j];
 
-                    Complex64 R_m = rotated_access(temp + (input_loc_idx << n_power), diag_index_, idx, n_power);
-                    Complex64 L_m = input[idx + ((L_matrix_loc_ + j) << n_power)];
+                    int diag_index_ = diag_index[repack_imag_to_real? L_matrix_loc_ + 3 + j : L_matrix_loc_ + j];
+
+                    int rot_idx = (idx + diag_index_) & (rot_mod - 1);
+                    Complex64 R_m = temp[(input_loc_idx << log_dslots) + rot_idx];
+                    Complex64 L_m = input[idx + ((L_matrix_loc_ + j) << log_dslots)];
 
                     int output_location = output_index[output_index_counter_];
-                    Complex64 res = output[(output_location << n_power) + idx];
+                    Complex64 res = output[(output_location << log_dslots) + idx];
                     res = res + (L_m * R_m);
-                    output[(output_location << n_power) + idx] = res;
+                    output[(output_location << log_dslots) + idx] = res;
 
                     output_index_counter_++;
                 }
@@ -490,14 +530,17 @@ namespace heongpu
         Complex64* input, Complex64* output, Complex64* temp, int* diag_index,
         int* input_index, int* output_index, int iteration_count,
         int R_matrix_counter, int output_index_counter, int mul_index,
-        bool first1, bool first2, int n_power)
+        bool first1, bool first2, int n_power, int log_dslots)
     {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; // [0, dslots)
+
+        int n         = 1 << n_power;
+        int idx_eff   = idx & (n - 1);      // within-half index
 
         int offset = first1 ? 2 : 3;
         int L_matrix_loc_ = offset + 3 * (mul_index-1);
         int L_matrix_size = 3;
-        
+
         int R_matrix_counter_ = R_matrix_counter;
         int output_index_counter_ = output_index_counter;
         int iter_R_m = iteration_count;
@@ -505,9 +548,9 @@ namespace heongpu
         {
             for (int i = 0; i < iter_R_m; i++)
             {
-                Complex64 R_m = input[idx + (i << n_power)];
                 int output_location = output_index[output_index_counter_];
-                output[(output_location << n_power) + idx] = R_m;
+                Complex64 R_m = input[idx + (i << log_dslots)];
+                output[(output_location << log_dslots) + idx] = R_m;
                 output_index_counter_++;
             }
         }
@@ -520,14 +563,16 @@ namespace heongpu
                 for (int j = 0; j < L_matrix_size; j++)
                 {
                     int diag_index_ = diag_index[L_matrix_loc_ + j];
-                    
-                    Complex64 R_m = rotated_access(temp + (input_loc_idx << n_power), diag_index_, idx, n_power);
-                    Complex64 L_m = input[idx + ((L_matrix_loc_ + j) << n_power)];
+
+                    // Half-aware rotated access: rotate within the same half
+                    int rot_idx = ((idx_eff + diag_index_) & (n - 1));
+                    Complex64 R_m = temp[(input_loc_idx << log_dslots) + rot_idx];
+                    Complex64 L_m = input[idx + ((L_matrix_loc_ + j) << log_dslots)];
 
                     int output_location = output_index[output_index_counter_];
-                    Complex64 res = output[(output_location << n_power) + idx];
+                    Complex64 res = output[(output_location << log_dslots) + idx];
                     res = res + (L_m * R_m);
-                    output[(output_location << n_power) + idx] = res;
+                    output[(output_location << log_dslots) + idx] = res;
 
                     output_index_counter_++;
                 }

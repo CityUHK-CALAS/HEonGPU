@@ -637,6 +637,8 @@ namespace heongpu
         int n_power;
         int slot_count_;
 
+        int gap_; // @company CipherFlow
+
         int Q_prime_size_;
         int Q_size_;
         int P_size_;

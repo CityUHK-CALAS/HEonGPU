@@ -202,12 +202,12 @@ namespace heongpu
         Complex64* complex_message, Data64* plaintext, Modulus64* modulus,
         Data64* Mi_inv, Data64* Mi, Data64* upper_half_threshold,
         Data64* decryption_modulus, int coeff_modulus_count, double scale,
-        double two_pow_64, int* reverse_order, int n_power)
+        double two_pow_64, int* reverse_order, int n_power, int gap) // @company CipherFlow
     {
         int idx = blockIdx.x * blockDim.x + threadIdx.x; // slot_count
         double inv_scale = double(1.0) / scale;
         double two_pow_64_reg = two_pow_64;
-        int offset = 1 << (n_power - 1);
+        int offset = 1 << (n_power - 1); 
 
         Data64 compose_result[50]; // TODO: Define size as global variable
         Data64 big_integer_result[50]; // TODO: Define size as global variable
@@ -217,7 +217,7 @@ namespace heongpu
 #pragma unroll
         for (int i = 0; i < coeff_modulus_count; i++)
         {
-            Data64 base = plaintext[idx + (i << n_power)];
+            Data64 base = plaintext[idx * gap + (i << n_power)]; // @company CipherFlow
             Data64 temp = OPERATOR_GPU_64::mult(base, Mi_inv[i], modulus[i]);
 
             biginteger::multiply(Mi + (i * coeff_modulus_count),
@@ -285,7 +285,7 @@ namespace heongpu
 #pragma unroll
         for (int i = 0; i < coeff_modulus_count; i++)
         {
-            Data64 base = plaintext[idx + offset + (i << n_power)];
+            Data64 base = plaintext[idx * gap + offset + (i << n_power)]; // @company CipherFlow
             Data64 temp = OPERATOR_GPU_64::mult(base, Mi_inv[i], modulus[i]);
 
             biginteger::multiply(Mi + (i * coeff_modulus_count),
@@ -349,6 +349,21 @@ namespace heongpu
 
         int order = reverse_order[idx];
         complex_message[order] = result_c;
+    }
+
+    // @company CipherFlow
+    __global__ void sparse_ntt_expand_kernel(Data64* dst, const Data64* src,
+                                             int log_slot_count, int n_power,
+                                             int coeff_modulus_count)
+    {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; // 0..N-1
+        int idy = blockIdx.y;                            // 0..Q_size_-1
+
+        int log_sparse_n = log_slot_count + 1;
+        int log_gap = n_power - log_sparse_n; // log2(gap)
+        int src_idx = idx >> log_gap;
+
+        dst[idx + (idy << n_power)] = src[src_idx + (idy << log_sparse_n)];
     }
 
     // @company CipherFlow 

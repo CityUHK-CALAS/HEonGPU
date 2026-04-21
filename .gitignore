@@ -29,3 +29,5 @@ CTestTestfile.cmake
 *.DS_Store
 
 install/
+
+*.txt

@@ -25,6 +25,11 @@ namespace heongpu
 
         n_power = context.n_power;
 
+        slot_count = context.slot_count; // @company CipherFlow
+        log_slot_count = context.log_slot_count; // @company CipherFlow
+
+        gap_ = (n >> 1) / slot_count; // @company CipherFlow
+
         Q_prime_size_ = context.Q_prime_size;
         Q_size_ = context.Q_size;
         P_size_ = context.P_size;
@@ -32,6 +37,9 @@ namespace heongpu
         modulus_ = context.modulus_;
 
         ntt_table_ = context.ntt_table_;
+
+        ntt_table_slot_ = context.ntt_table_slot_; // @company CipherFlow
+        ntt_table_dslot_ = context.ntt_table_dslot_; // @company CipherFlow
 
         intt_table_ = context.intt_table_;
 
@@ -2776,10 +2784,18 @@ namespace heongpu
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_vec_complex(
         Complex64* input, Data64* output, const double scale, int rns_count)
     {
-        double fix = scale / static_cast<double>(slot_count_);
+        // @company CipherFlow begin ---
+        int log_slot_count_local = (gap_ > 1) ? (log_slot_count_ + 1)
+                                               : log_slot_count_;
+        int slot_count = 1 << log_slot_count_local;
+        int log_sparse_n = log_slot_count_local + 1;
+        int gap = n >> (log_slot_count_local + 1);
+        // @company CipherFlow end ---
+
+        double fix = scale / static_cast<double>(slot_count); // @company CipherFlow 
 
         gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
+        cfg_ifft.n_power = log_slot_count_local; // @company CipherFlow 
         cfg_ifft.fft_type = gpufft::type::INVERSE;
         cfg_ifft.mod_inverse = Complex64(fix, 0.0);
         cfg_ifft.stream = 0;
@@ -2787,22 +2803,49 @@ namespace heongpu
         gpufft::GPU_Special_FFT(input, special_ifft_roots_table_->data(),
                                 cfg_ifft, 1);
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1),
-                                        256>>>(output, input, modulus_->data(),
-                                               rns_count, two_pow_64_,
-                                               reverse_order_->data(), n_power);
+        // @company CipherFlow 
+        // Generate bit-reverse table for the requested slot_count.
+        std::vector<int> bit_rev(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            bit_rev[i] = gpuntt::bitreverse(i, log_slot_count_local);
+        DeviceVector<int> reverse_order_local(bit_rev);
+
+        // @company CipherFlow 
+        // When gap > 1 (sparse), use a temp compact buffer; otherwise write directly.
+        DeviceVector<Data64> compact_buf;
+        Data64* compact = output;
+        if (gap > 1)
+        {
+            compact_buf = DeviceVector<Data64>((1 << log_sparse_n) * rns_count);
+            compact = compact_buf.data();
+        }
+
+        encode_kernel_ckks_conversion<<<dim3(((slot_count) >> 8), 1, 1), 256>>>(
+            compact, input, modulus_->data(), rns_count, two_pow_64_,
+            reverse_order_local.data(), log_sparse_n); // @company CipherFlow 
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
+        Root64* ntt_table_ptr = (log_slot_count_local == log_slot_count_)
+                                    ? ntt_table_slot_->data()
+                                    : ntt_table_dslot_->data(); // @company CipherFlow 
+
         gpuntt::ntt_rns_configuration<Data64> cfg_ntt = {
-            .n_power = n_power,
+            .n_power = log_sparse_n, // @company CipherFlow 
             .ntt_type = gpuntt::FORWARD,
-            .ntt_layout = gpuntt::PerPolynomial,   
+            .ntt_layout = gpuntt::PerPolynomial,
             .reduction_poly = gpuntt::ReductionPolynomial::X_N_plus,
             .zero_padding = false,
             .stream = 0};
 
-        gpuntt::GPU_NTT_Inplace(output, ntt_table_->data(), modulus_->data(),
-                                cfg_ntt, rns_count, rns_count);
+        gpuntt::GPU_NTT_Inplace(compact, ntt_table_ptr, // @company CipherFlow 
+                                modulus_->data(), cfg_ntt, rns_count, rns_count);
+        // @company CipherFlow 
+        if (gap > 1)
+        {
+            sparse_ntt_expand_kernel<<<dim3((n >> 8), rns_count, 1), 256>>>(
+                output, compact, log_slot_count_local, n_power, rns_count);
+            HEONGPU_CUDA_CHECK(cudaGetLastError());
+        }
     }
 
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_constant_complex(
@@ -2830,22 +2873,40 @@ namespace heongpu
         gpufft::GPU_Special_FFT(message_gpu.data(),
                                 special_ifft_roots_table_->data(), cfg_ifft, 1);
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1),
-                                        256>>>(
-            output, message_gpu.data(), modulus_->data(), Q_size_, two_pow_64_,
-            reverse_order_->data(), n_power);
+        int log_sparse_n = log_slot_count_ + 1; // @company CipherFlow 
+
+        // @company CipherFlow 
+        // When gap_ > 1 (sparse), use a temp compact buffer; otherwise write directly.
+        DeviceVector<Data64> compact_buf;
+        Data64* compact = output;
+        if (gap_ > 1)
+        {
+            compact_buf = DeviceVector<Data64>((1 << log_sparse_n) * Q_size_);
+            compact = compact_buf.data();
+        }
+
+        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256>>>(
+            compact, message_gpu.data(), modulus_->data(), Q_size_, two_pow_64_,
+            reverse_order_->data(), log_sparse_n); // @company CipherFlow 
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         gpuntt::ntt_rns_configuration<Data64> cfg_ntt = {
-            .n_power = n_power,
+            .n_power = log_sparse_n, // @company CipherFlow 
             .ntt_type = gpuntt::FORWARD,
-            .ntt_layout = gpuntt::PerPolynomial,   
+            .ntt_layout = gpuntt::PerPolynomial,
             .reduction_poly = gpuntt::ReductionPolynomial::X_N_plus,
             .zero_padding = false,
             .stream = 0};
 
-        gpuntt::GPU_NTT_Inplace(output, ntt_table_->data(), modulus_->data(),
-                                cfg_ntt, Q_size_, Q_size_);
+        gpuntt::GPU_NTT_Inplace(compact, ntt_table_slot_->data(), // @company CipherFlow 
+                                modulus_->data(), cfg_ntt, Q_size_, Q_size_);
+        // @company CipherFlow 
+        if (gap_ > 1)
+        {
+            sparse_ntt_expand_kernel<<<dim3((n >> 8), Q_size_, 1), 256>>>(
+                output, compact, log_slot_count_, n_power, Q_size_);
+            HEONGPU_CUDA_CHECK(cudaGetLastError());
+        }
     }
 
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_constant_double(
@@ -3028,15 +3089,15 @@ namespace heongpu
 
             heongpu::DeviceVector<Data64> temp_encoded(
                 (vandermonde.V_matrixs_index_[m].size() * current_rns_count)
-                << (vandermonde.log_num_slots_ + 1));
+                << n_power);
 
             double scale = static_cast<double>(prime_vector_[current_rns_count-1].value);
 
             for (int i = 0; i < vandermonde.V_matrixs_index_[m].size(); i++)
             {
-                int matrix_location = (i << vandermonde.log_num_slots_);
+                int matrix_location = (i << vandermonde.log_dslots_);
                 int plaintext_location =
-                    ((i * current_rns_count) << (vandermonde.log_num_slots_ + 1));
+                    ((i * current_rns_count) << n_power);
 
                 quick_ckks_encoder_vec_complex(
                     vandermonde.V_matrixs_rotated_[m].data() + matrix_location,
@@ -3067,15 +3128,15 @@ namespace heongpu
 
             heongpu::DeviceVector<Data64> temp_encoded(
                 (vandermonde.V_inv_matrixs_index_[m].size() * current_rns_count)
-                << (vandermonde.log_num_slots_ + 1));
+                << n_power);
 
             double scale = static_cast<double>(prime_vector_[current_rns_count-1].value);
 
             for (int i = 0; i < vandermonde.V_inv_matrixs_index_[m].size(); i++)
             {
-                int matrix_location = (i << vandermonde.log_num_slots_);
+                int matrix_location = (i << vandermonde.log_dslots_);
                 int plaintext_location =
-                    ((i * current_rns_count) << (vandermonde.log_num_slots_ + 1));
+                    ((i * current_rns_count) << n_power);
 
                 quick_ckks_encoder_vec_complex(
                     vandermonde.V_inv_matrixs_rotated_[m].data() +
@@ -3461,7 +3522,8 @@ namespace heongpu
         return result;
     }
 
-    __host__ std::vector<Ciphertext<Scheme::CKKS>>
+    __host__ std::tuple<Ciphertext<Scheme::CKKS>,
+                        std::optional<Ciphertext<Scheme::CKKS>>>
     HEOperator<Scheme::CKKS>::coeff_to_slot_v2(
         Ciphertext<Scheme::CKKS>& cipher, Galoiskey<Scheme::CKKS>& galois_key,
         const ExecutionOptions& options)
@@ -3490,11 +3552,20 @@ namespace heongpu
             modulus_->data(), n_power);
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        std::vector<Ciphertext<Scheme::CKKS>> result;
-        result.push_back(std::move(result0));
-        result.push_back(std::move(result1));
+        // Sparse path (gap_ > 1)
+        // @company CipherFlow
+        if (gap_ > 1)
+        {
+            Ciphertext<Scheme::CKKS> result1_rot =
+                operator_ciphertext(0, options.stream_);
+            rotate_rows(result1, result1_rot, galois_key, slot_count_, options);
+            add(result0, result1_rot, result0, options);
 
-        return result;
+            // Second element is unused in sparse path
+            return {std::move(result0), Ciphertext<Scheme::CKKS>()};
+        }
+
+        return {std::move(result0), std::move(result1)};
     }
 
     __host__ Ciphertext<Scheme::CKKS>
@@ -3581,18 +3652,28 @@ namespace heongpu
 
     __host__ Ciphertext<Scheme::CKKS>
     HEOperator<Scheme::CKKS>::slot_to_coeff_v2(
-        Ciphertext<Scheme::CKKS>& cipher0, Ciphertext<Scheme::CKKS>& cipher1,
+        Ciphertext<Scheme::CKKS>& cipher0,
+        std::optional<std::reference_wrapper<Ciphertext<Scheme::CKKS>>> cipher1,
         Galoiskey<Scheme::CKKS>& galois_key, const ExecutionOptions& options)
     {
-        cudaStream_t old_stream = cipher1.stream();
-        cipher1.switch_stream(
-            options.stream_); // TODO: Change copy and assign structure!
-        Ciphertext<Scheme::CKKS> result;
-        result = cipher1;
-        cipher1.switch_stream(
-            old_stream); // TODO: Change copy and assign structure!
+        // @company CipherFlow
+        if (!cipher1.has_value())
+        {
+            return multiply_matrix_v2(
+                cipher0, V_matrixs_rotated_encoded_, diags_matrices_bsgs_,
+                diags_matrices_bsgs_rot_n1_, diags_matrices_bsgs_rot_n2_,
+                galois_key, options);
+        }
 
-        int current_decomp_count = Q_size_ - cipher1.depth_;
+        // Dense path: combine i*cipher1 + cipher0 then apply DFT.
+        Ciphertext<Scheme::CKKS>& c1 = cipher1.value().get();
+        cudaStream_t old_stream = c1.stream();
+        c1.switch_stream(options.stream_); // TODO: Change copy and assign structure!
+        Ciphertext<Scheme::CKKS> result;
+        result = c1;
+        c1.switch_stream(old_stream); // TODO: Change copy and assign structure!
+
+        int current_decomp_count = Q_size_ - c1.depth_;
         cipher_mult_by_i_kernel<<<dim3((n >> 8), current_decomp_count, 2), 256,
                                   0, options.stream_>>>(
             result.data(), result.data(), ntt_table_->data(), modulus_->data(),
@@ -3602,11 +3683,11 @@ namespace heongpu
 
         add(result, cipher0, result, options);
 
-        Ciphertext<Scheme::CKKS> c1 = multiply_matrix_v2(
+        Ciphertext<Scheme::CKKS> c2 = multiply_matrix_v2(
             result, V_matrixs_rotated_encoded_, diags_matrices_bsgs_,
             diags_matrices_bsgs_rot_n1_, diags_matrices_bsgs_rot_n2_,
             galois_key, options);
-        return c1;
+        return c2;
     }
 
     __host__ Ciphertext<Scheme::CKKS>
@@ -6173,13 +6254,14 @@ namespace heongpu
     //////////////////////////////////////////////////////////////////////////
 
     __host__ HEOperator<Scheme::CKKS>::VandermondeCF::VandermondeCF(
-        const int poly_degree, const int CtoS_piece, const int StoC_piece,
+        const int num_slots, const int dslots, const int CtoS_piece, const int StoC_piece,
         const double CtoS_Scaling, const double StoC_Scaling,
         const float CtoS_bsgs_ratio, const float StoC_bsgs_ratio)
     {
-        poly_degree_ = poly_degree;
-        num_slots_ = poly_degree_ >> 1;
+        num_slots_ = num_slots;
         log_num_slots_ = int(log2l(num_slots_));
+        dslots_ = dslots;
+        log_dslots_ = int(log2l(dslots));
 
         CtoS_piece_ = CtoS_piece;
         StoC_piece_ = StoC_piece;
@@ -6220,23 +6302,36 @@ namespace heongpu
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_E_diagonals_index_cf()
     {
+
         for (int i = log_num_slots_; 0 < i; i--)
         {
-            int block_size = 1 << (log_num_slots_ - i);
-            if (i == 1)
-            {
-                E_index_.push_back(0);
-                E_index_.push_back(block_size);
-
-                E_size_.push_back(2);
-            }
-            else
-            {
+            if (dslots_ != num_slots_ && i == log_num_slots_) {
+                int block_size = 1 << (log_num_slots_ - i);
                 E_index_.push_back(0);
                 E_index_.push_back(block_size);
                 E_index_.push_back(num_slots_ - block_size);
+                E_index_.push_back(num_slots_);
+                E_index_.push_back(num_slots_ + block_size);
+                E_index_.push_back(2 * num_slots_ - block_size);
+                E_size_.push_back(6);
 
-                E_size_.push_back(3);
+            }  else {
+                int block_size = 1 << (log_num_slots_ - i);
+                if (i == 1)
+                {
+                    E_index_.push_back(0);
+                    E_index_.push_back(block_size);
+
+                    E_size_.push_back(2);
+                }
+                else
+                {
+                    E_index_.push_back(0);
+                    E_index_.push_back(block_size);
+                    E_index_.push_back(num_slots_ - block_size);
+
+                    E_size_.push_back(3);
+                }
             }
         }
     }
@@ -6277,23 +6372,25 @@ namespace heongpu
             E_splitted_.push_back(k);
         }
 
-        for (int i = 0; i < m; i++)
+        for (int i = StoC_piece_ - m; i < StoC_piece_; i++)
         {
             E_splitted_[i]++;
         }
 
         int counter = 0;
+        int size_counter = 0;
         for (int i = 0; i < StoC_piece_; i++)
         {
             std::vector<int> temp;
             for (int j = 0; j < E_splitted_[i]; j++)
             {
-                int size = (counter == (E_index_.size() - 2)) ? 2 : 3;
+                int size = E_size_[size_counter];
                 for (int k = 0; k < size; k++)
                 {
                     temp.push_back(E_index_[counter]);
                     counter++;
                 }
+                size_counter++;
             }
             E_splitted_index_.push_back(temp);
         }
@@ -6303,6 +6400,9 @@ namespace heongpu
         for (int k = 0; k < StoC_piece_; k++)
         {
             int matrix_count = E_splitted_[k];
+            int mask = (dslots_ != num_slots_ && k == 0)
+                           ? (2 * num_slots_ - 1)
+                           : num_slots_mask;
 
             // L_m_loc starts at the size of the first matrix
             int L_m_loc = E_size_[counter];
@@ -6324,7 +6424,7 @@ namespace heongpu
                             int L_m_İNDEX =
                                 E_splitted_index_[k][L_m_loc + j];
                             index_mul.push_back((L_m_İNDEX + R_m_İNDEX) &
-                                                num_slots_mask);
+                                                mask);
                         }
                     }
                     index_mul_sorted = unique_sort(index_mul);
@@ -6344,7 +6444,7 @@ namespace heongpu
                             int L_m_İNDEX =
                                 E_splitted_index_[k][L_m_loc + j];
                             index_mul.push_back((L_m_İNDEX + R_m_İNDEX) &
-                                                num_slots_mask);
+                                                mask);
                         }
                     }
                     index_mul_sorted = unique_sort(index_mul);
@@ -6374,6 +6474,9 @@ namespace heongpu
         for (int k = 0; k < StoC_piece_; k++)
         {
             int matrix_count = E_splitted_[k];
+            int mask = (dslots_ != num_slots_ && k == 0)
+                           ? (2 * num_slots_ - 1)
+                           : num_slots_mask;
             // L_m_loc starts at the size of the first matrix
             int L_m_loc = 0;
             std::vector<int> index_mul;
@@ -6409,7 +6512,7 @@ namespace heongpu
                             int L_m_İNDEX =
                                 E_splitted_index_[k][L_m_loc + j];
                             int indexs =
-                                (L_m_İNDEX + R_m_İNDEX) & num_slots_mask;
+                                (L_m_İNDEX + R_m_İNDEX) & mask;
                             index_mul.push_back(indexs);
                             temp_out_index.push_back(
                                 dict_output_index[k][indexs]);
@@ -6593,22 +6696,23 @@ namespace heongpu
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_E_diagonals_cf()
     {
-        int bloksize = (num_slots_ <= 1024) ? num_slots_ : 1024;
-        int blokcount = (num_slots_ + (1023)) / 1024;
+        int bloksize  = (dslots_ <= 1024) ? dslots_ : 1024;
+        int blokcount = (dslots_ + 1023) / 1024;
 
         heongpu::DeviceVector<Complex64> V_logn_diagnal(
-            ((3 * log_num_slots_) - 1) << log_num_slots_);
+            ((3 * log_num_slots_) - 1) << log_dslots_);
         E_diagonal_generate_kernel_cf<<<dim3(blokcount, log_num_slots_, 1),
-                                     bloksize>>>(V_logn_diagnal.data(),
-                                                 log_num_slots_);
+                                        bloksize>>>(V_logn_diagnal.data(),
+                                                    log_num_slots_,
+                                                    log_dslots_);
 
-        Complex64 scaling(std::pow(StoC_Scaling_, 1.0/double(StoC_piece_)), 0.0); 
+        Complex64 scaling(std::pow(StoC_Scaling_, 1.0/double(StoC_piece_)), 0.0);
 
         int matrix_counter = 0;
         for (int i = 0; i < StoC_piece_; i++)
         {
-            // heongpu::DeviceVector<int> diag_index_gpu(
-            //     E_splitted_diag_index_gpu_[i]);
+            bool repack_imag_to_real = (log_dslots_ != log_num_slots_) && (i == 0);
+
             heongpu::DeviceVector<int> diag_index_gpu(
                 E_splitted_index_[i]);
             heongpu::DeviceVector<int> input_index_gpu(
@@ -6617,33 +6721,34 @@ namespace heongpu
                 E_splitted_output_index_gpu_[i]);
 
             heongpu::DeviceVector<Complex64> V_mul((V_matrixs_index_[i].size())
-                                                   << log_num_slots_);
+                                                   << log_dslots_);
             cudaMemset(V_mul.data(), 0, V_mul.size() * sizeof(Complex64));
+            
 
-            int input_loc = (3 * matrix_counter) << log_num_slots_;
+            int input_loc = (3 * matrix_counter) << log_dslots_;
             int R_matrix_counter = 0;
             int output_index_counter = 0;
 
-            for (int j = 0; j < (E_splitted_[i]); j++)
+            for (int j = 0; j < E_splitted_[i]; j++)
             {
                 heongpu::DeviceVector<Complex64> temp_result(
-                    (V_matrixs_index_[i].size()) << log_num_slots_);
+                    (V_matrixs_index_[i].size()) << log_dslots_);
                 cudaMemset(temp_result.data(), 0,
                            temp_result.size() * sizeof(Complex64));
 
-                bool first_check = (j == 0) ? true : false;
-                bool last_check = ((i == (StoC_piece_ - 1)) &&
-                                   (j == (E_splitted_[i] - 1)))
-                                      ? true
-                                      : false;
-                int iteration_count = (j>0) ? E_splitted_iteration_gpu_[i][j-1] : E_size_[matrix_counter];
+                bool first = (j == 0);
+                bool last  = (i == StoC_piece_ - 1) && (j == E_splitted_[i] - 1);
+
+               int iteration_count = (j>0) ? E_splitted_iteration_gpu_[i][j-1] : E_size_[matrix_counter];
+
 
                 E_diagonal_matrix_mult_kernel_cf<<<blokcount, bloksize>>>(
                     V_logn_diagnal.data() + input_loc, temp_result.data(),
                     V_mul.data(), diag_index_gpu.data(), input_index_gpu.data(),
                     output_index_gpu.data(), iteration_count,
-                    R_matrix_counter, output_index_counter, j, first_check,
-                    last_check, log_num_slots_);
+                    R_matrix_counter, output_index_counter, j, first,
+                    last, log_num_slots_, log_dslots_,
+                    repack_imag_to_real ? dslots_ : num_slots_, repack_imag_to_real);
 
                 V_mul = std::move(temp_result);
 
@@ -6653,7 +6758,7 @@ namespace heongpu
 
             if (StoC_Scaling_ != 1.0) {
                 complex_vector_scale_kernel<<<dim3(blokcount, V_matrixs_index_[i].size(), 1), bloksize>>>(
-                    V_mul.data(), scaling, log_num_slots_);
+                    V_mul.data(), scaling, log_dslots_);
             }
 
             V_matrixs_.push_back(std::move(V_mul));
@@ -6665,22 +6770,20 @@ namespace heongpu
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_E_inv_diagonals_cf()
     {
-        int bloksize = (num_slots_ <= 1024) ? num_slots_ : 1024;
-        int blokcount = (num_slots_ + (1023)) / 1024;
+        int bloksize = (dslots_ <= 1024) ? dslots_ : 1024;
+        int blokcount = (dslots_ + (1023)) / 1024;
 
         heongpu::DeviceVector<Complex64> V_inv_logn_diagnal(
-            ((3 * log_num_slots_) - 1) << log_num_slots_);
+            ((3 * log_num_slots_) - 1) << log_dslots_);
         E_diagonal_inverse_generate_kernel_cf<<<dim3(blokcount, log_num_slots_, 1),
                                                      bloksize>>>(
-            V_inv_logn_diagnal.data(), log_num_slots_);
+            V_inv_logn_diagnal.data(), log_num_slots_, log_dslots_);
 
         Complex64 scaling(std::pow(CtoS_Scaling_, 1.0/double(CtoS_piece_)), 0.0);
-    
+
         int matrix_counter = 0;
         for (int i = 0; i < CtoS_piece_; i++)
         {
-            // heongpu::DeviceVector<int> diag_index_gpu(
-            //     E_inv_splitted_diag_index_gpu_[i]);
             heongpu::DeviceVector<int> diag_index_gpu(
                 E_inv_splitted_index_[i]);
             heongpu::DeviceVector<int> input_index_gpu(
@@ -6689,9 +6792,9 @@ namespace heongpu
                 E_inv_splitted_output_index_gpu_[i]);
 
             heongpu::DeviceVector<Complex64> V_mul(
-                (V_inv_matrixs_index_[i].size()) << log_num_slots_);
+                (V_inv_matrixs_index_[i].size()) << log_dslots_);
             cudaMemset(V_mul.data(), 0, V_mul.size() * sizeof(Complex64));
-           
+
             int input_loc;
             if (i == 0)
             {
@@ -6699,16 +6802,16 @@ namespace heongpu
             }
             else
             {
-                input_loc = ((3 * matrix_counter) - 1) << log_num_slots_;
+                input_loc = ((3 * matrix_counter) - 1) << log_dslots_;
             }
-            
+
             int R_matrix_counter = 0;
             int output_index_counter = 0;
 
             for (int j = 0; j < (E_inv_splitted_[i]); j++)
             {
                 heongpu::DeviceVector<Complex64> temp_result(
-                    (V_inv_matrixs_index_[i].size()) << log_num_slots_);
+                    (V_inv_matrixs_index_[i].size()) << log_dslots_);
                 cudaMemset(temp_result.data(), 0,
                            temp_result.size() * sizeof(Complex64));
 
@@ -6716,14 +6819,14 @@ namespace heongpu
                 bool first_check2 = (j == 0) ? true : false;
 
                 int iteration_count = (j>0) ? E_inv_splitted_iteration_gpu_[i][j-1] : E_inv_size_[matrix_counter];
-               
+
                 E_diagonal_inverse_matrix_mult_kernel_cf<<<blokcount, bloksize>>>(
                     V_inv_logn_diagnal.data() + input_loc, temp_result.data(),
                     V_mul.data(), diag_index_gpu.data(), input_index_gpu.data(),
                     output_index_gpu.data(),
                     iteration_count, R_matrix_counter,
                     output_index_counter, j, first_check1, first_check2,
-                    log_num_slots_);
+                    log_num_slots_, log_dslots_);
 
                 V_mul = std::move(temp_result);
 
@@ -6731,9 +6834,17 @@ namespace heongpu
                 output_index_counter += (j > 0)? (iteration_count * 3): iteration_count;
             }
 
+            if ((i == CtoS_piece_ - 1) && (log_dslots_ != log_num_slots_)) {
+                int num_diags = static_cast<int>(V_inv_matrixs_index_[i].size());
+                for (int k = 0; k < num_diags; k++) {
+                    cudaMemset(V_mul.data() + k * dslots_ + num_slots_, 0,
+                               num_slots_ * sizeof(Complex64));
+                }
+            }
+
             if (CtoS_Scaling_ != 1.0) {
                 complex_vector_scale_kernel<<<dim3(blokcount, V_inv_matrixs_index_[i].size(), 1), bloksize>>>(
-                    V_mul.data(), scaling, log_num_slots_);
+                    V_mul.data(), scaling, log_dslots_);
             }
 
             V_inv_matrixs_.push_back(std::move(V_mul));
@@ -6741,7 +6852,7 @@ namespace heongpu
         }
     }
 
-    
+
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_V_n_lists_cf(
         float CtoS_bsgs_ratio, float StoC_bsgs_ratio)
@@ -6750,7 +6861,7 @@ namespace heongpu
         {
             std::vector<int> rot_n1, rot_n2; 
             std::vector<std::vector<int>> result = 
-                    heongpu::seperate_func_v2(V_matrixs_index_[i], num_slots_, rot_n1, rot_n2, StoC_bsgs_ratio);
+                    heongpu::seperate_func_v2(V_matrixs_index_[i], dslots_, rot_n1, rot_n2, StoC_bsgs_ratio);
 
             diags_matrices_bsgs_.push_back(std::move(result));
 
@@ -6762,7 +6873,7 @@ namespace heongpu
         {
             std::vector<int> rot_n1, rot_n2; 
             std::vector<std::vector<int>> result =
-                    heongpu::seperate_func_v2(V_inv_matrixs_index_[i], num_slots_, rot_n1, rot_n2, CtoS_bsgs_ratio); 
+                    heongpu::seperate_func_v2(V_inv_matrixs_index_[i], dslots_, rot_n1, rot_n2, CtoS_bsgs_ratio); 
 
             diags_matrices_inv_bsgs_.push_back(std::move(result));
 
@@ -6775,13 +6886,13 @@ namespace heongpu
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_pre_comp_V_cf()
     {
-        int bloksize = (num_slots_ <= 1024) ? num_slots_ : 1024;
-        int blokcount = (num_slots_ + (1023)) / 1024;
+        int bloksize = (dslots_ <= 1024) ? dslots_ : 1024;
+        int blokcount = (dslots_ + (1023)) / 1024;
 
         for (int m = 0; m < StoC_piece_; m++)
         {
             heongpu::DeviceVector<Complex64> temp_rotated(
-                (V_matrixs_index_[m].size()) << log_num_slots_);
+                (V_matrixs_index_[m].size()) << log_dslots_);
 
             int counter = 0;
             for (int j = 0; j < diags_matrices_bsgs_[m].size(); j++)
@@ -6789,12 +6900,11 @@ namespace heongpu
                 int real_shift = -(diags_matrices_bsgs_rot_n1_[m][j]);
                 for (int i = 0; i < diags_matrices_bsgs_[m][j].size(); i++)
                 {
-                    int location = (counter << log_num_slots_);
-
+                    int location = (counter << log_dslots_);
                     vector_rotate_kernel<<<blokcount, bloksize>>>(
                         V_matrixs_[m].data() + location,
                         temp_rotated.data() + location, real_shift,
-                        log_num_slots_);
+                        log_dslots_);
 
                     counter++;
                 }
@@ -6807,26 +6917,25 @@ namespace heongpu
     __host__ void
     HEOperator<Scheme::CKKS>::VandermondeCF::generate_pre_comp_V_inv_cf()
     {
-        int bloksize = (num_slots_ <= 1024) ? num_slots_ : 1024;
-        int blokcount = (num_slots_ + (1023)) / 1024;
+        int bloksize  = (dslots_ <= 1024) ? dslots_ : 1024;
+        int blokcount = (dslots_ + 1023) / 1024;
 
         for (int m = 0; m < CtoS_piece_; m++)
         {
             heongpu::DeviceVector<Complex64> temp_rotated(
-                (V_inv_matrixs_index_[m].size()) << log_num_slots_);
+                (V_inv_matrixs_index_[m].size()) << log_dslots_);
 
             int counter = 0;
             for (int j = 0; j < diags_matrices_inv_bsgs_[m].size(); j++)
             {
-                int real_shift = -(diags_matrices_inv_bsgs_rot_n1_[m][j]); 
+                int real_shift = -(diags_matrices_inv_bsgs_rot_n1_[m][j]);
                 for (int i = 0; i < diags_matrices_inv_bsgs_[m][j].size(); i++)
                 {
-                    int location = (counter << log_num_slots_);
-
+                    int location = (counter << log_dslots_);
                     vector_rotate_kernel<<<blokcount, bloksize>>>(
                         V_inv_matrixs_[m].data() + location,
                         temp_rotated.data() + location, real_shift,
-                        log_num_slots_);
+                        log_dslots_);
 
                     counter++;
                 }
@@ -7162,7 +7271,7 @@ namespace heongpu
                         : stc_config_.scaling_;
                 }
 
-                VandermondeCF matrix_gen(n,
+                VandermondeCF matrix_gen(slot_count_, gap_ == 1? slot_count_ : slot_count_ << 1,
                                          cts_config_.level_start_ != -1 ? CtoS_piece_ : 0,
                                          stc_config_.level_start_ != -1 ? StoC_piece_ : 0,
                                          CtoS_Scaling, StoC_Scaling,
@@ -7190,6 +7299,16 @@ namespace heongpu
                 }
 
                 key_indexs_ = matrix_gen.key_indexs_;
+            }
+
+            // @company CipherFlow
+            if (gap_ > 1)
+            {
+                for (int i = log_slot_count_; i < n_power - 1; i++)
+                {
+                    key_indexs_.push_back(1 << i);
+                }
+                key_indexs_ = unique_sort(key_indexs_);
             }
 
             boot_context_generated_ = true;
@@ -7405,20 +7524,42 @@ namespace heongpu
                      c_raised, options);
         }
 
-        // Coeff to slot
-        std::vector<heongpu::Ciphertext<Scheme::CKKS>> enc_results =
-            coeff_to_slot_v2(c_raised, galois_key, options); // c_raised
-        
-        Ciphertext<Scheme::CKKS> ciph_sin0 =
-            eval_mod(enc_results[0], relin_key, options);
-        Ciphertext<Scheme::CKKS> ciph_sin1 =
-            eval_mod(enc_results[1], relin_key, options);
-        ciph_sin0.scale_ = scale_boot_;
-        ciph_sin1.scale_ = scale_boot_;
+        // @company CipherFlow
+        for (int i = log_slot_count_; i < n_power - 1; i++)
+        {
+            Ciphertext<Scheme::CKKS> tmp =
+                operator_ciphertext(0, options.stream_);
+            rotate_rows(c_raised, tmp, galois_key, 1 << i, options);
+            add(c_raised, tmp, c_raised, options);
+        }
 
-        // Slot to coeff
-        Ciphertext<Scheme::CKKS> StoC_results =
-            slot_to_coeff_v2(ciph_sin0, ciph_sin1, galois_key, options);
+        // @company CipherFlow
+        auto [ct_real, ct_imag] =
+            coeff_to_slot_v2(c_raised, galois_key, options); // c_raised
+
+        Ciphertext<Scheme::CKKS> ciph_sin0 =
+            eval_mod(ct_real, relin_key, options);
+        ciph_sin0.scale_ = scale_boot_;
+
+        // @company CipherFlow begib ---
+        Ciphertext<Scheme::CKKS> StoC_results;
+        if (gap_ > 1)
+        {
+            // Sparse: single packed ciphertext goes directly into StC.
+            StoC_results =
+                slot_to_coeff_v2(ciph_sin0, std::nullopt, galois_key, options);
+        }
+        else
+        {
+            // Dense: separate real/imag paths.
+            Ciphertext<Scheme::CKKS> ciph_sin1 =
+                eval_mod(ct_imag.value(), relin_key, options);
+            ciph_sin1.scale_ = scale_boot_;
+            StoC_results =
+                slot_to_coeff_v2(ciph_sin0, std::ref(ciph_sin1), galois_key, options);
+        }
+        // @company CipherFlow end ---
+
         StoC_results.scale_ = scale_boot_;
 
         return StoC_results;

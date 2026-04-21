@@ -1704,7 +1704,7 @@ namespace heongpu
             Mi_inv_->data() + location1, Mi_->data() + location2,
             upper_half_threshold_->data() + location1,
             decryption_modulus_->data() + location1, current_decomp_count,
-            common.scale_, two_pow_64, reverse_order->data(), n_power);
+            common.scale_, two_pow_64, reverse_order->data(), n_power, gap_); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         gpufft::fft_configuration<Float64> cfg_fft{};

@@ -7,16 +7,23 @@
 #include "ckks/precision.cuh"
 #include "../example_util.h"
 
-int main(int argc, char* argv[])
+void run_bootstrapping(size_t poly_modulus_degree, int slot_count,
+                       const std::string& label)
 {
-    cudaSetDevice(0); 
+    std::cout << "\n========================================" << std::endl;
+    std::cout << label << std::endl;
+    std::cout << "  N = " << poly_modulus_degree
+              << ", slot_count = " << slot_count
+              << ", gap = " << (poly_modulus_degree / 2) / slot_count
+              << std::endl;
+    std::cout << "========================================" << std::endl;
 
     heongpu::HEContext<heongpu::Scheme::CKKS> context(
         heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
         heongpu::sec_level_type::none);
-    size_t poly_modulus_degree = 1 << 16;
     context.set_poly_modulus_degree(poly_modulus_degree);
-
+    context.set_slot_count(slot_count);
+    
     context.set_coeff_modulus_values(
         {
             0x10000000006e0001, // 60 Q0
@@ -57,7 +64,7 @@ int main(int argc, char* argv[])
     context.print_parameters();
 
     int h = 192;
-    int ephemeral_secret_weight = 32;  
+    int ephemeral_secret_weight = 32;
 
     double scale = pow(2.0, 40);
 
@@ -97,7 +104,6 @@ int main(int argc, char* argv[])
     heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context,
                                                                    encoder);
 
-    const int slot_count = poly_modulus_degree / 2;
     std::vector<Complex64> message;
     for (int i = 0; i < slot_count; i++)
     {
@@ -110,7 +116,9 @@ int main(int argc, char* argv[])
     heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context);
     encryptor.encrypt(C1, P1);
 
-    heongpu::EvalModConfig eval_mod_config(context.get_key_modulus()[0].value, 20, 256.0, 16, 30, 3, 0, pow(2.0, 60));
+    heongpu::EvalModConfig eval_mod_config(context.get_key_modulus()[0].value,
+                                           20, 256.0, 16, 30, 3, 0,
+                                           pow(2.0, 60));
 
     heongpu::BootstrappingConfigV2 boot_config(
         heongpu::EncodingMatrixConfig(
@@ -125,9 +133,9 @@ int main(int argc, char* argv[])
     std::cout << "Total galois key needed for CKKS bootstrapping: "
               << key_index.size() << std::endl;
     heongpu::Galoiskey<heongpu::Scheme::CKKS> galois_key(context, key_index);
-    keygen.generate_galois_key(galois_key, secret_key); 
+    keygen.generate_galois_key(galois_key, secret_key);
 
-    // Drop all level until one level remain
+    // Drop all levels until one level remains
     for (int i = 0; i < 24; i++)
     {
         operators.mod_drop_inplace(C1);
@@ -175,6 +183,26 @@ int main(int argc, char* argv[])
                 << " - ACTUAL:" << decrypted_1[j] << std::endl;
     }
     std::cout << std::endl;
-        
+
+    delete swk_dense_to_sparse;
+    delete swk_sparse_to_dense;
+}
+
+int main(int argc, char* argv[])
+{
+    cudaSetDevice(0);
+
+    size_t poly_modulus_degree = 1 << 16;
+
+    // Full packing: slot_count = N/2, gap = 1
+    run_bootstrapping(poly_modulus_degree, poly_modulus_degree / 2,
+                      "Full Packing Bootstrapping");
+
+    cudaDeviceSynchronize();
+
+    // Sparse packing: slot_count = N/4, gap = 2
+    run_bootstrapping(poly_modulus_degree, poly_modulus_degree / 8,
+                      "Sparse Packing Bootstrapping");
+
     return EXIT_SUCCESS;
 }
