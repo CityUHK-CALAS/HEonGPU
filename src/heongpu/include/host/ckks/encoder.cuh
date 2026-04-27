@@ -107,7 +107,7 @@ namespace heongpu
                 {
                     encode_ringt_ckks(plain_, message, scale, options.stream_);
 
-                    plain.plain_size_ = n * 1;
+                    plain.plain_size_ = slot_count_ * 2; 
                     plain.scheme_ = scheme_;
                     plain.depth_ = Q_size_-1;
                     plain.scale_ = scale;
@@ -203,43 +203,6 @@ namespace heongpu
                 },
                 options);
         }
-
-        /**
-         * @company CipherFlow
-         */
-        __host__ void
-        encode_ringt(Plaintext<Scheme::CKKS>& plain,
-               const std::vector<Complex64>& message, double scale,
-               const ExecutionOptions& options = ExecutionOptions())
-        {
-            if ((scale <= 0) ||
-                (static_cast<int>(log2(scale)) >= total_coeff_bit_count_))
-            {
-                throw std::invalid_argument("Scale out of bounds");
-            }
-
-            if (message.size() > slot_count_)
-                throw std::invalid_argument(
-                    "Vector size can not be higher than slot count!");
-
-            output_storage_manager(
-                plain,
-                [&](Plaintext<Scheme::CKKS>& plain_)
-                {
-                    encode_ringt_ckks(plain_, message, scale, options.stream_);
-
-                    plain.plain_size_ = n * 1;
-                    plain.scheme_ = scheme_;
-                    plain.depth_ = 0;
-                    plain.scale_ = scale;
-                    plain.in_ntt_domain_ = false;
-                    plain.is_ringt_ = false;
-                    plain.plaintext_generated_ = true;
-                },
-                options);
-        }
-
-        //
 
         /**
          * @brief Encodes a message of complex numbers into a plaintext.
@@ -372,6 +335,89 @@ namespace heongpu
 
         /**
          * @company CipherFlow
+         *
+         * @brief Encodes a message of complex numbers into a plaintext using
+         * doubled slots (log_slot_count_+1) for sparse STC input.
+         *
+         * @param plain Plaintext object where the result will be stored.
+         * @param message Vector of Complex64 to encode.
+         * @param scale Encoding scale.
+         */
+        __host__ void
+        encode_with_dslots(Plaintext<Scheme::CKKS>& plain,
+               const std::vector<Complex64>& message, double scale,
+               const ExecutionOptions& options = ExecutionOptions())
+        {
+            if (gap_ <= 1)
+                throw std::logic_error(
+                    "encode_with_dslots requires sparse encoding (gap > 1)");
+
+            int log_slot_count = log_slot_count_ + 1;
+            int sc = 1 << log_slot_count;
+            if ((scale <= 0) ||
+                (static_cast<int>(log2(scale)) >= total_coeff_bit_count_))
+            {
+                throw std::invalid_argument("Scale out of bounds");
+            }
+
+            if (static_cast<int>(message.size()) > sc)
+                throw std::invalid_argument(
+                    "Vector size can not be higher than slot count!");
+
+            output_storage_manager(
+                plain,
+                [&](Plaintext<Scheme::CKKS>& plain_)
+                {
+                    encode_ckks_with_dslots(plain_, message, scale,
+                                options.stream_);
+
+                    plain.plain_size_ = n * Q_size_;
+                    plain.scheme_ = scheme_;
+                    plain.depth_ = 0;
+                    plain.scale_ = scale;
+                    plain.in_ntt_domain_ = true;
+                    plain.plaintext_generated_ = true;
+                },
+                options);
+        }
+
+        /**
+         * @company CipherFlow
+         */
+        __host__ void
+        encode_ringt(Plaintext<Scheme::CKKS>& plain,
+               const std::vector<Complex64>& message, double scale,
+               const ExecutionOptions& options = ExecutionOptions())
+        {
+            if ((scale <= 0) ||
+                (static_cast<int>(log2(scale)) >= total_coeff_bit_count_))
+            {
+                throw std::invalid_argument("Scale out of bounds");
+            }
+
+            if (message.size() > slot_count_)
+                throw std::invalid_argument(
+                    "Vector size can not be higher than slot count!");
+
+            output_storage_manager(
+                plain,
+                [&](Plaintext<Scheme::CKKS>& plain_)
+                {
+                    encode_ringt_ckks(plain_, message, scale, options.stream_);
+
+                    plain.plain_size_ = slot_count_ * 2;
+                    plain.scheme_ = scheme_;
+                    plain.depth_ = 0;
+                    plain.scale_ = scale;
+                    plain.in_ntt_domain_ = false;
+                    plain.is_ringt_ = false;
+                    plain.plaintext_generated_ = true;
+                },
+                options);
+        }
+
+        /**
+         * @company CipherFlow
          */
         __host__ void
         ringt_to_pt(Plaintext<Scheme::CKKS>& plain_ringt, Plaintext<Scheme::CKKS>& plain_pt,
@@ -388,7 +434,7 @@ namespace heongpu
                 throw std::invalid_argument("Input plaintext ringt is in NTT domain");
             }
 
-            if (plain_ringt.memory_size() != n)
+            if (plain_ringt.memory_size() != slot_count_*2) 
             {
                 throw std::invalid_argument("Input plaintext ringt has invalid size");
             }
@@ -492,6 +538,30 @@ namespace heongpu
 
         /**
          * @company CipherFlow
+         *
+         * @brief Decodes a plaintext into a vector of complex numbers using
+         * doubled slots (log_slot_count_+1) for sparse CtoS output.
+         *
+         * @param message Vector where the decoded message will be stored.
+         * @param plain Plaintext object to be decoded.
+         */
+        __host__ void
+        decode_with_dslots(std::vector<Complex64>& message, Plaintext<Scheme::CKKS> plain,
+               const ExecutionOptions& options = ExecutionOptions())
+        {
+            if (gap_ <= 1)
+                throw std::logic_error(
+                    "decode_with_dslots requires sparse encoding (gap > 1)");
+
+            input_storage_manager(
+                plain,
+                [&](Plaintext<Scheme::CKKS> plain_)
+                { decode_ckks_with_dslots(message, plain_, options.stream_); },
+                options, false);
+        }
+
+        /**
+         * @company CipherFlow
          * 
          * @brief Encodes values directly in the coefficient domain (without FFT).
          *
@@ -588,14 +658,6 @@ namespace heongpu
                                   const double scale,
                                   const cudaStream_t stream);
         
-        /**
-         * @company CipherFlow
-         */
-        __host__ void encode_ringt_ckks(Plaintext<Scheme::CKKS>& plain,
-                                        const std::vector<Complex64>& message,
-                                        const double scale,
-                                        const cudaStream_t stream);
-
         __host__ void encode_ckks(Plaintext<Scheme::CKKS>& plain,
                                   const HostVector<Complex64>& message,
                                   const double scale,
@@ -611,6 +673,22 @@ namespace heongpu
                                   const std::int64_t& message,
                                   const double scale,
                                   const cudaStream_t stream);
+
+        /**
+         * @company CipherFlow
+         */
+        __host__ void encode_ckks_with_dslots(Plaintext<Scheme::CKKS>& plain,
+                                  const std::vector<Complex64>& message,
+                                  const double scale,
+                                  const cudaStream_t stream);
+
+        /**
+         * @company CipherFlow
+         */
+        __host__ void encode_ringt_ckks(Plaintext<Scheme::CKKS>& plain,
+                                        const std::vector<Complex64>& message,
+                                        const double scale,
+                                        const cudaStream_t stream);
         
         /**
          * @company CipherFlow
@@ -643,6 +721,13 @@ namespace heongpu
         /**
          * @company CipherFlow
          */
+        __host__ void decode_ckks_with_dslots(std::vector<Complex64>& message,
+                                  Plaintext<Scheme::CKKS>& plain,
+                                  const cudaStream_t stream);
+
+        /**
+         * @company CipherFlow
+         */
         __host__ void encode_coeff_ckks(Plaintext<Scheme::CKKS>& plain,
                                         const std::vector<double>& message,
                                         const double scale,
@@ -660,6 +745,7 @@ namespace heongpu
         int n;
         int n_power;
         int slot_count_;
+        int gap_; // @company CipherFlow
 
         double two_pow_64;
         int log_slot_count_;
@@ -676,6 +762,9 @@ namespace heongpu
         std::shared_ptr<DeviceVector<Root64>> ntt_table_;
         std::shared_ptr<DeviceVector<Root64>> intt_table_;
         std::shared_ptr<DeviceVector<Ninverse64>> n_inverse_;
+
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_slot_; // @company CipherFlow
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_dslot_; // @company CipherFlow
 
         std::shared_ptr<DeviceVector<Data64>> Mi_;
         std::shared_ptr<DeviceVector<Data64>> Mi_inv_;

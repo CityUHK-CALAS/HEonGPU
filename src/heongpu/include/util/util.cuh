@@ -92,15 +92,8 @@ namespace heongpu
         PolyType poly_type_ = PolyType::CHEBYSHEV;
 
         EvalModConfig()
-            : sine_deg_(0), double_angle_(0), arcsine_deg_(0), level_start_(0),
+            : sine_deg_(0), double_angle_(0), arcsine_deg_(0), level_start_(-1),
               K_(0), message_ratio_(0.0), Q_(0), scaling_factor_(0.0), piece_(0)
-        {
-        }
-
-        EvalModConfig(int level_start)
-            : sine_deg_(30), double_angle_(3), arcsine_deg_(0),
-              level_start_(level_start), K_(16), message_ratio_(256.0), Q_(0),
-              scaling_factor_(0.0)
         {
         }
 
@@ -145,30 +138,19 @@ namespace heongpu
         int level_start_;
         double bsgs_ratio_;
         int piece_;
+        double scaling_;
 
         EncodingMatrixConfig()
-            : lt_type_(LinearTransformType::COEFFS_TO_SLOTS), level_start_(0),
-              bsgs_ratio_(0.0), piece_(0)
+            : lt_type_(LinearTransformType::COEFFS_TO_SLOTS), level_start_(-1),
+              bsgs_ratio_(0.0), piece_(0), scaling_(0.0)
         {
-        }
-
-        EncodingMatrixConfig(LinearTransformType lt_type, int level_start)
-            : lt_type_(lt_type), level_start_(level_start), bsgs_ratio_(2.0)
-        {
-            if (lt_type == LinearTransformType::COEFFS_TO_SLOTS)
-            {
-                piece_ = 4;
-            }
-            else
-            {
-                piece_ = 3;
-            }
         }
 
         EncodingMatrixConfig(LinearTransformType lt_type, int level_start,
-                             double bsgs_ratio, int piece)
+                             double bsgs_ratio, int piece,
+                             double scaling = 0.0)
             : lt_type_(lt_type), level_start_(level_start),
-              bsgs_ratio_(bsgs_ratio), piece_(piece)
+              bsgs_ratio_(bsgs_ratio), piece_(piece), scaling_(scaling)
         {
         }
     };

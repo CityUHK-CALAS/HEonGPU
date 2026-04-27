@@ -44,7 +44,8 @@ namespace heongpu
     /**
      * @company CipherFlow
      */
-    __global__ void E_diagonal_generate_kernel_cf(Complex64* output, int n_power);
+    __global__ void E_diagonal_generate_kernel_cf(Complex64* output, int n_power,
+                                                  int log_dslots);
 
     __global__ void E_diagonal_inverse_generate_kernel(Complex64* output,
                                                        int n_power);
@@ -53,7 +54,8 @@ namespace heongpu
      * @company CipherFlow
      */
     __global__ void E_diagonal_inverse_generate_kernel_cf(Complex64* output,
-                                                               int n_power);
+                                                          int n_power,
+                                                          int log_dslots);
 
     __global__ void E_diagonal_inverse_matrix_mult_single_kernel(
         Complex64* input, Complex64* output, bool last, int n_power);
@@ -63,7 +65,7 @@ namespace heongpu
         int* input_index, int* output_index, int iteration_count,
         int R_matrix_counter, int output_index_counter, int mul_index,
         bool first1, bool first2, int n_power);
-    
+
     /**
      * @company CipherFlow
      */
@@ -71,7 +73,8 @@ namespace heongpu
         Complex64* input, Complex64* output, Complex64* temp, int* diag_index,
         int* input_index, int* output_index, int iteration_count,
         int R_matrix_counter, int output_index_counter, int mul_index,
-        bool first, bool last, int n_power);
+        bool first, bool last, int n_power, int log_dslots, int rot_mod,
+        bool repack_imag_to_real);
 
     __global__ void E_diagonal_inverse_matrix_mult_kernel(
         Complex64* input, Complex64* output, Complex64* temp, int* diag_index,
@@ -86,7 +89,7 @@ namespace heongpu
         Complex64* input, Complex64* output, Complex64* temp, int* diag_index,
         int* input_index, int* output_index, int iteration_count,
         int R_matrix_counter, int output_index_counter, int mul_index,
-        bool first, bool last, int n_power);
+        bool first1, bool first2, int n_power, int log_dslots);
 
     __global__ void complex_vector_scale_kernel(Complex64* data,
                                                 Complex64 scale, int n_power);

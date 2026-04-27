@@ -275,11 +275,37 @@ namespace heongpu
         }
     }
 
+    /**
+     * @company CipherFlow
+     */
+    void HEContext<Scheme::CKKS>::set_slot_count(int sc)
+    {
+        if (sc <= 0 || (sc & (sc - 1)) != 0)
+        {
+            throw std::invalid_argument(
+                "slot_count must be a positive power of 2");
+        }
+        slot_count = sc;
+        slot_count_specified_ = true;
+    }
+
     void HEContext<Scheme::CKKS>::generate()
     {
         if ((!context_generated_) && (poly_modulus_degree_specified_) &&
             (coeff_modulus_specified_))
         {
+            // @company CipherFlow begin ---
+            if (!slot_count_specified_)
+            {
+                slot_count = n >> 1;
+            }
+            else if (slot_count > (n >> 1))
+            {
+                throw std::invalid_argument(
+                    "slot_count must be <= n/2");
+            }
+            // @company CipherFlow end ---
+
             // Memory pool initialization
             MemoryPool::instance().initialize();
             MemoryPool::instance().use_memory_pool(true);
@@ -314,6 +340,8 @@ namespace heongpu
             std::vector<Ninverse64> Qprime_n_inverse =
                 generate_n_inverse(n, prime_vector_);
 
+            log_slot_count = int(log2(slot_count)); // @company CipherFlow
+
             ntt_table_ =
                 std::make_shared<DeviceVector<Root64>>(Qprime_ntt_table);
 
@@ -322,6 +350,35 @@ namespace heongpu
 
             n_inverse_ =
                 std::make_shared<DeviceVector<Ninverse64>>(Qprime_n_inverse);
+            
+            // @company CipherFlow begin ---
+            if (log_slot_count == n_power - 1)
+            {
+                // Full packing: slot_count = n/2, all three tables are the same.
+                ntt_table_slot_  = ntt_table_;
+                ntt_table_dslot_ = ntt_table_;
+            }
+            else
+            {
+                int log_sparse_n = log_slot_count + 1;
+                int sparse_n = 1 << log_sparse_n;
+                std::vector<Data64> base_q_psi_sparse =
+                    generate_primitive_root_of_unity(sparse_n, prime_vector_);
+                std::vector<Root64> Qprime_sparse_ntt_table =
+                    generate_ntt_table(base_q_psi_sparse, prime_vector_, log_sparse_n);
+                ntt_table_slot_ =
+                    std::make_shared<DeviceVector<Root64>>(Qprime_sparse_ntt_table);
+
+                int log_sparse_dn = log_slot_count + 2;
+                int sparse_dn = 1 << log_sparse_dn;
+                std::vector<Data64> base_q_psi_sparse_d =
+                    generate_primitive_root_of_unity(sparse_dn, prime_vector_);
+                std::vector<Root64> Qprime_sparse_d_ntt_table =
+                    generate_ntt_table(base_q_psi_sparse_d, prime_vector_, log_sparse_dn);
+                ntt_table_dslot_ =
+                    std::make_shared<DeviceVector<Root64>>(Qprime_sparse_d_ntt_table);
+            }
+            // @company CipherFlow end ---
 
             std::vector<Data64> last_q_modinv =
                 calculate_last_q_modinv(prime_vector_, Q_prime_size, P_size);

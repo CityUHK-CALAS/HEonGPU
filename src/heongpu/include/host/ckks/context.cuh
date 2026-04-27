@@ -55,6 +55,8 @@ namespace heongpu
         void set_coeff_modulus_values(const std::vector<Data64>& log_Q_bases,
                                       const std::vector<Data64>& log_P_bases);
 
+        void set_slot_count(int slot_count); // @company CipherFlow
+
         void generate();
 
         void print_parameters();
@@ -65,6 +67,8 @@ namespace heongpu
         {
             return n_power;
         }
+
+        inline int get_slot_count() const noexcept { return slot_count; } // @company CipherFlow
 
         inline int get_ciphertext_modulus_count() const noexcept
         {
@@ -91,6 +95,7 @@ namespace heongpu
         bool poly_modulus_degree_specified_ = false;
         bool coeff_modulus_specified_ = false;
         bool context_generated_ = false;
+        bool slot_count_specified_ = false; // @company CipherFlow
 
         scheme_type scheme_;
         sec_level_type sec_level_;
@@ -98,6 +103,9 @@ namespace heongpu
 
         int n;
         int n_power;
+
+        int slot_count; // @company CipherFlow
+        int log_slot_count; // @company CipherFlow
 
         int coeff_modulus;
         int total_coeff_bit_count;
@@ -121,6 +129,10 @@ namespace heongpu
         std::shared_ptr<DeviceVector<Root64>> ntt_table_;
         std::shared_ptr<DeviceVector<Root64>> intt_table_;
         std::shared_ptr<DeviceVector<Ninverse64>> n_inverse_;
+
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_slot_; // @company CipherFlow
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_dslot_; // @company CipherFlow
+
         std::shared_ptr<DeviceVector<Data64>> last_q_modinv_;
         std::shared_ptr<DeviceVector<Data64>> half_p_;
         std::shared_ptr<DeviceVector<Data64>> half_mod_;

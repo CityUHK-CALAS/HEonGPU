@@ -1876,6 +1876,9 @@ namespace heongpu
 
         int n_power;
 
+        int slot_count; // @company CipherFlow
+        int log_slot_count; // @company CipherFlow
+
         // New
         int Q_prime_size_;
         int Q_size_;
@@ -1885,6 +1888,10 @@ namespace heongpu
         std::shared_ptr<DeviceVector<Root64>> ntt_table_;
         std::shared_ptr<DeviceVector<Root64>> intt_table_;
         std::shared_ptr<DeviceVector<Ninverse64>> n_inverse_;
+
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_slot_; // @company CipherFlow
+        std::shared_ptr<DeviceVector<Root64>> ntt_table_dslot_; // @company CipherFlow
+
         std::shared_ptr<DeviceVector<Data64>> last_q_modinv_;
 
         std::shared_ptr<DeviceVector<Data64>> half_p_;
@@ -2085,7 +2092,7 @@ namespace heongpu
             template <Scheme S> friend class HELogicOperator;
 
           public:
-            __host__ VandermondeCF(const int poly_degree, const int CtoS_piece,
+            __host__ VandermondeCF(const int num_slots, const int dslots, const int CtoS_piece,
                                    const int StoC_piece, const double CtoS_Scaling,
                                    const double StoC_Scaling, const float CtoS_bsgs_ratio,
                                    const float StoC_bsgs_ratio);
@@ -2115,9 +2122,11 @@ namespace heongpu
             VandermondeCF() = delete;
 
           private:
-            int poly_degree_;
             int num_slots_;
             int log_num_slots_;
+
+            int dslots_;
+            int log_dslots_;
 
             int CtoS_piece_;
             int StoC_piece_;
@@ -2250,6 +2259,7 @@ namespace heongpu
 
         int slot_count_;
         int log_slot_count_;
+        int gap_; // @company CipherFlow
 
         // CKKS
         double two_pow_64_;
@@ -2327,17 +2337,39 @@ namespace heongpu
             std::vector<std::vector<std::vector<int>>>& real_shift,
             Galoiskey<Scheme::CKKS>& galois_key,
             const ExecutionOptions& options = ExecutionOptions());
+    
+      public:
+        __host__ Ciphertext<Scheme::CKKS>
+        mod_up_from_q0(Ciphertext<Scheme::CKKS>& cipher,
+                       Switchkey<Scheme::CKKS>* swk_dense_to_sparse = nullptr,
+                       Switchkey<Scheme::CKKS>* swk_sparse_to_dense = nullptr,
+                       const ExecutionOptions& options = ExecutionOptions());
+
+        __host__ std::tuple<Ciphertext<Scheme::CKKS>,
+                            std::optional<Ciphertext<Scheme::CKKS>>>
+        coeff_to_slot_v2(Ciphertext<Scheme::CKKS>& cipher,
+                        Galoiskey<Scheme::CKKS>& galois_key,
+                        const ExecutionOptions& options = ExecutionOptions());
+        
+        __host__ Ciphertext<Scheme::CKKS>
+        slot_to_coeff_v2(Ciphertext<Scheme::CKKS>& cipher0,
+                         std::optional<std::reference_wrapper<Ciphertext<Scheme::CKKS>>> cipher1,
+                         Galoiskey<Scheme::CKKS>& galois_key,
+                         const ExecutionOptions& options = ExecutionOptions());
+                
+        __host__ Ciphertext<Scheme::CKKS>
+        eval_mod(Ciphertext<Scheme::CKKS>& cipher,
+                 Relinkey<Scheme::CKKS>& relin_key,
+                 const ExecutionOptions& options = ExecutionOptions());
+
+      protected:
         
          __host__ std::vector<Ciphertext<Scheme::CKKS>>
         coeff_to_slot(Ciphertext<Scheme::CKKS>& cipher,
                       Galoiskey<Scheme::CKKS>& galois_key,
                       const ExecutionOptions& options = ExecutionOptions());
 
-        __host__ std::vector<Ciphertext<Scheme::CKKS>>
-        coeff_to_slot_v2(Ciphertext<Scheme::CKKS>& cipher,
-                         Galoiskey<Scheme::CKKS>& galois_key,
-                         const ExecutionOptions& options = ExecutionOptions());
-
+        
         __host__ Ciphertext<Scheme::CKKS> solo_coeff_to_slot(
             Ciphertext<Scheme::CKKS>& cipher,
             Galoiskey<Scheme::CKKS>& galois_key,
@@ -2348,23 +2380,12 @@ namespace heongpu
                       Ciphertext<Scheme::CKKS>& cipher1,
                       Galoiskey<Scheme::CKKS>& galois_key,
                       const ExecutionOptions& options = ExecutionOptions());
-
-        __host__ Ciphertext<Scheme::CKKS>
-        slot_to_coeff_v2(Ciphertext<Scheme::CKKS>& cipher0,
-                         Ciphertext<Scheme::CKKS>& cipher1,
-                         Galoiskey<Scheme::CKKS>& galois_key,
-                         const ExecutionOptions& options = ExecutionOptions());
         
         __host__ Ciphertext<Scheme::CKKS> solo_slot_to_coeff(
             Ciphertext<Scheme::CKKS>& cipher,
             Galoiskey<Scheme::CKKS>& galois_key,
             const ExecutionOptions& options = ExecutionOptions());
 
-        __host__ Ciphertext<Scheme::CKKS>
-        mod_up_from_q0(Ciphertext<Scheme::CKKS>& cipher,
-                       Switchkey<Scheme::CKKS>* swk_dense_to_sparse = nullptr,
-                       Switchkey<Scheme::CKKS>* swk_sparse_to_dense = nullptr,
-                       const ExecutionOptions& options = ExecutionOptions());
 
         __host__ Ciphertext<Scheme::CKKS>
         exp_scaled(Ciphertext<Scheme::CKKS>& cipher,
@@ -2374,11 +2395,6 @@ namespace heongpu
          __host__ Ciphertext<Scheme::CKKS> exp_taylor_approximation(
             Ciphertext<Scheme::CKKS>& cipher, Relinkey<Scheme::CKKS>& relin_key,
             const ExecutionOptions& options = ExecutionOptions());
-        
-        __host__ Ciphertext<Scheme::CKKS>
-        eval_mod(Ciphertext<Scheme::CKKS>& cipher,
-                 Relinkey<Scheme::CKKS>& relin_key,
-                 const ExecutionOptions& options = ExecutionOptions());
         
         __host__ void
         gen_power(std::unordered_map<int, Ciphertext<Scheme::CKKS>>& cipher,

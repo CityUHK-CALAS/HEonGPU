@@ -275,6 +275,378 @@ TEST(HEonGPU, CKKS_Encoding_Decoding)
     cudaDeviceSynchronize();
 }
 
+/**
+ * @company CipherFlow
+ */
+TEST(HEonGPU, CKKS_Sparse_Encoding)
+{
+    cudaSetDevice(0);
+
+    // gap=2: slot_count = N/4
+    {
+        size_t poly_modulus_degree = 8192;
+        int slot_count = poly_modulus_degree / 4;
+        heongpu::HEContext<heongpu::Scheme::CKKS> context(
+            heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
+            heongpu::sec_level_type::none);
+        context.set_poly_modulus_degree(poly_modulus_degree);
+        context.set_slot_count(slot_count);
+        context.set_coeff_modulus_bit_sizes({40, 30, 30, 30}, {40});
+        context.generate();
+
+        heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+        heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
+        keygen.generate_secret_key(secret_key);
+
+        heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
+        keygen.generate_public_key(public_key, secret_key);
+
+        heongpu::Relinkey<heongpu::Scheme::CKKS> relin_key(context);
+        keygen.generate_relin_key(relin_key, secret_key);
+
+        heongpu::HEEncoder<heongpu::Scheme::CKKS> encoder(context);
+        heongpu::HEEncryptor<heongpu::Scheme::CKKS> encryptor(context, public_key);
+        heongpu::HEDecryptor<heongpu::Scheme::CKKS> decryptor(context, secret_key);
+        heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        std::vector<double> message1(slot_count), message2(slot_count);
+        for (int i = 0; i < slot_count; i++)
+        {
+            message1[i] = dis(gen);
+            message2[i] = dis(gen);
+        }
+        std::vector<double> expected(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            expected[i] = message1[i] * message2[i];
+
+        double scale = pow(2.0, 30);
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1(context), P2(context);
+        encoder.encode(P1, message1, scale);
+        encoder.encode(P2, message2, scale);
+
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context), C2(context);
+        encryptor.encrypt(C1, P1);
+        encryptor.encrypt(C2, P2);
+
+        operators.multiply_inplace(C1, C2);
+        operators.relinearize_inplace(C1, relin_key);
+        operators.rescale_inplace(C1);
+
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P3(context);
+        decryptor.decrypt(P3, C1);
+
+        std::vector<double> gpu_result;
+        encoder.decode(gpu_result, P3);
+
+        cudaDeviceSynchronize();
+
+        EXPECT_EQ(fix_point_array_check(expected, gpu_result), true);
+    }
+
+    cudaDeviceSynchronize();
+
+    // gap=4: slot_count = N/8, need slot_count >= 2048 so N >= 16384
+    {
+        size_t poly_modulus_degree = 16384;
+        int slot_count = poly_modulus_degree / 8;
+        heongpu::HEContext<heongpu::Scheme::CKKS> context(
+            heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
+            heongpu::sec_level_type::none);
+        context.set_poly_modulus_degree(poly_modulus_degree);
+        context.set_slot_count(slot_count);
+        context.set_coeff_modulus_bit_sizes({40, 30, 30, 30, 30, 30}, {40});
+        context.generate();
+
+        heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+        heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
+        keygen.generate_secret_key(secret_key);
+
+        heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
+        keygen.generate_public_key(public_key, secret_key);
+
+        heongpu::Relinkey<heongpu::Scheme::CKKS> relin_key(context);
+        keygen.generate_relin_key(relin_key, secret_key);
+
+        heongpu::HEEncoder<heongpu::Scheme::CKKS> encoder(context);
+        heongpu::HEEncryptor<heongpu::Scheme::CKKS> encryptor(context, public_key);
+        heongpu::HEDecryptor<heongpu::Scheme::CKKS> decryptor(context, secret_key);
+        heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        std::vector<double> message1(slot_count), message2(slot_count);
+        for (int i = 0; i < slot_count; i++)
+        {
+            message1[i] = dis(gen);
+            message2[i] = dis(gen);
+        }
+        std::vector<double> expected(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            expected[i] = message1[i] * message2[i];
+
+        double scale = pow(2.0, 30);
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1(context), P2(context);
+        encoder.encode(P1, message1, scale);
+        encoder.encode(P2, message2, scale);
+
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context), C2(context);
+        encryptor.encrypt(C1, P1);
+        encryptor.encrypt(C2, P2);
+
+        operators.multiply_inplace(C1, C2);
+        operators.relinearize_inplace(C1, relin_key);
+        operators.rescale_inplace(C1);
+
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P3(context);
+        decryptor.decrypt(P3, C1);
+
+        std::vector<double> gpu_result;
+        encoder.decode(gpu_result, P3);
+
+        cudaDeviceSynchronize();
+
+        EXPECT_EQ(fix_point_array_check(expected, gpu_result), true);
+    }
+
+    cudaDeviceSynchronize();
+}
+
+/**
+ * @company CipherFlow
+ */
+TEST(HEonGPU, CKKS_RingT_Encoding_FullPacking)
+{
+    cudaSetDevice(0);
+
+    {
+        size_t poly_modulus_degree = 8192;
+        heongpu::HEContext<heongpu::Scheme::CKKS> context(
+            heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
+            heongpu::sec_level_type::none);
+        context.set_poly_modulus_degree(poly_modulus_degree);
+        context.set_coeff_modulus_bit_sizes({40, 30, 30, 30}, {40});
+        context.generate();
+
+        heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+        heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
+        keygen.generate_secret_key(secret_key);
+
+        heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
+        keygen.generate_public_key(public_key, secret_key);
+
+        heongpu::Relinkey<heongpu::Scheme::CKKS> relin_key(context);
+        keygen.generate_relin_key(relin_key, secret_key);
+
+        heongpu::HEEncoder<heongpu::Scheme::CKKS> encoder(context);
+        heongpu::HEEncryptor<heongpu::Scheme::CKKS> encryptor(context, public_key);
+        heongpu::HEDecryptor<heongpu::Scheme::CKKS> decryptor(context, secret_key);
+        heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        const int slot_count = poly_modulus_degree / 2;
+        std::vector<double> message1(slot_count), message2(slot_count);
+        for (int i = 0; i < slot_count; i++)
+        {
+            message1[i] = dis(gen);
+            message2[i] = dis(gen);
+        }
+        std::vector<double> expected(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            expected[i] = message1[i] * message2[i];
+
+        double scale = pow(2.0, 30);
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1_ringt(context), P2_ringt(context);
+        encoder.encode_ringt(P1_ringt, message1, scale);
+        encoder.encode_ringt(P2_ringt, message2, scale);
+
+        int level = 3;
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1(context), P2(context);
+        encoder.ringt_to_pt(P1_ringt, P1, level);
+        encoder.ringt_to_pt(P2_ringt, P2, level);
+
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context), C2(context);
+        encryptor.encrypt(C1, P1);
+        encryptor.encrypt(C2, P2);
+
+        operators.multiply_inplace(C1, C2);
+        operators.relinearize_inplace(C1, relin_key);
+        operators.rescale_inplace(C1);
+
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P3(context);
+        decryptor.decrypt(P3, C1);
+
+        std::vector<double> gpu_result;
+        encoder.decode(gpu_result, P3);
+
+        cudaDeviceSynchronize();
+
+        EXPECT_EQ(fix_point_array_check(expected, gpu_result), true);
+    }
+
+    cudaDeviceSynchronize();
+}
+
+/**
+ * @company CipherFlow
+ */
+TEST(HEonGPU, CKKS_RingT_Encoding_SparsePacking)
+{
+    cudaSetDevice(0);
+
+    // gap=2: slot_count = N/4
+    {
+        size_t poly_modulus_degree = 8192;
+        int slot_count = poly_modulus_degree / 4;
+        heongpu::HEContext<heongpu::Scheme::CKKS> context(
+            heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
+            heongpu::sec_level_type::none);
+        context.set_poly_modulus_degree(poly_modulus_degree);
+        context.set_slot_count(slot_count);
+        context.set_coeff_modulus_bit_sizes({40, 30, 30, 30}, {40});
+        context.generate();
+
+        heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+        heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
+        keygen.generate_secret_key(secret_key);
+
+        heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
+        keygen.generate_public_key(public_key, secret_key);
+
+        heongpu::Relinkey<heongpu::Scheme::CKKS> relin_key(context);
+        keygen.generate_relin_key(relin_key, secret_key);
+
+        heongpu::HEEncoder<heongpu::Scheme::CKKS> encoder(context);
+        heongpu::HEEncryptor<heongpu::Scheme::CKKS> encryptor(context, public_key);
+        heongpu::HEDecryptor<heongpu::Scheme::CKKS> decryptor(context, secret_key);
+        heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        std::vector<double> message1(slot_count), message2(slot_count);
+        for (int i = 0; i < slot_count; i++)
+        {
+            message1[i] = dis(gen);
+            message2[i] = dis(gen);
+        }
+        std::vector<double> expected(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            expected[i] = message1[i] * message2[i];
+
+        double scale = pow(2.0, 30);
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1_ringt(context), P2_ringt(context);
+        encoder.encode_ringt(P1_ringt, message1, scale);
+        encoder.encode_ringt(P2_ringt, message2, scale);
+
+        int level = 3;
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1(context), P2(context);
+        encoder.ringt_to_pt(P1_ringt, P1, level);
+        encoder.ringt_to_pt(P2_ringt, P2, level);
+
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context), C2(context);
+        encryptor.encrypt(C1, P1);
+        encryptor.encrypt(C2, P2);
+
+        operators.multiply_inplace(C1, C2);
+        operators.relinearize_inplace(C1, relin_key);
+        operators.rescale_inplace(C1);
+
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P3(context);
+        decryptor.decrypt(P3, C1);
+
+        std::vector<double> gpu_result;
+        encoder.decode(gpu_result, P3);
+
+        cudaDeviceSynchronize();
+
+        EXPECT_EQ(fix_point_array_check(expected, gpu_result), true);
+    }
+
+    cudaDeviceSynchronize();
+
+    // gap=4: slot_count = N/8
+    {
+        size_t poly_modulus_degree = 16384;
+        int slot_count = poly_modulus_degree / 8;
+        heongpu::HEContext<heongpu::Scheme::CKKS> context(
+            heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
+            heongpu::sec_level_type::none);
+        context.set_poly_modulus_degree(poly_modulus_degree);
+        context.set_slot_count(slot_count);
+        context.set_coeff_modulus_bit_sizes({40, 30, 30, 30, 30, 30}, {40});
+        context.generate();
+
+        heongpu::HEKeyGenerator<heongpu::Scheme::CKKS> keygen(context);
+        heongpu::Secretkey<heongpu::Scheme::CKKS> secret_key(context);
+        keygen.generate_secret_key(secret_key);
+
+        heongpu::Publickey<heongpu::Scheme::CKKS> public_key(context);
+        keygen.generate_public_key(public_key, secret_key);
+
+        heongpu::Relinkey<heongpu::Scheme::CKKS> relin_key(context);
+        keygen.generate_relin_key(relin_key, secret_key);
+
+        heongpu::HEEncoder<heongpu::Scheme::CKKS> encoder(context);
+        heongpu::HEEncryptor<heongpu::Scheme::CKKS> encryptor(context, public_key);
+        heongpu::HEDecryptor<heongpu::Scheme::CKKS> decryptor(context, secret_key);
+        heongpu::HEArithmeticOperator<heongpu::Scheme::CKKS> operators(context, encoder);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        std::vector<double> message1(slot_count), message2(slot_count);
+        for (int i = 0; i < slot_count; i++)
+        {
+            message1[i] = dis(gen);
+            message2[i] = dis(gen);
+        }
+        std::vector<double> expected(slot_count);
+        for (int i = 0; i < slot_count; i++)
+            expected[i] = message1[i] * message2[i];
+
+        double scale = pow(2.0, 30);
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1_ringt(context), P2_ringt(context);
+        encoder.encode_ringt(P1_ringt, message1, scale);
+        encoder.encode_ringt(P2_ringt, message2, scale);
+
+        int level = 5;
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P1(context), P2(context);
+        encoder.ringt_to_pt(P1_ringt, P1, level);
+        encoder.ringt_to_pt(P2_ringt, P2, level);
+
+        heongpu::Ciphertext<heongpu::Scheme::CKKS> C1(context), C2(context);
+        encryptor.encrypt(C1, P1);
+        encryptor.encrypt(C2, P2);
+
+        operators.multiply_inplace(C1, C2);
+        operators.relinearize_inplace(C1, relin_key);
+        operators.rescale_inplace(C1);
+
+        heongpu::Plaintext<heongpu::Scheme::CKKS> P3(context);
+        decryptor.decrypt(P3, C1);
+
+        std::vector<double> gpu_result;
+        encoder.decode(gpu_result, P3);
+
+        cudaDeviceSynchronize();
+
+        EXPECT_EQ(fix_point_array_check(expected, gpu_result), true);
+    }
+
+    cudaDeviceSynchronize();
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

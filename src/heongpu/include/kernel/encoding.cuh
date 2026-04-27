@@ -55,7 +55,12 @@ namespace heongpu
         Complex64* complex_message, Data64* plaintext, Modulus64* modulus,
         Data64* Mi_inv, Data64* Mi, Data64* upper_half_threshold,
         Data64* decryption_modulus, int coeff_modulus_count, double scale,
-        double two_pow_64, int* reverse_order, int n_power);
+        double two_pow_64, int* reverse_order, int n_power, int gap); // // @company CipherFlow
+
+    // @company CipherFlow
+    __global__ void sparse_ntt_expand_kernel(Data64* dst, const Data64* src,
+                                             int log_slot_count, int n_power,
+                                             int coeff_modulus_count);
     
     // @company CipherFlow
     __global__ void
