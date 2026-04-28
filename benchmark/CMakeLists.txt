@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Alişah Özcan
+# Copyright 2024-2026 Alişah Özcan
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 # Developer: Alişah Özcan
@@ -6,9 +6,9 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/benchmark)
 
 set(EXECUTABLES
-    bfv_benchmark benchmark_bfv.cu
-    ckks_benchmark benchmark_ckks.cu
-    tfhe_benchmark benchmark_tfhe.cu
+    bfv_benchmark benchmark_bfv.cpp
+    ckks_benchmark benchmark_ckks.cpp
+    tfhe_benchmark benchmark_tfhe.cpp
 )
 
 function(add_benchmark exe source)
@@ -16,7 +16,7 @@ function(add_benchmark exe source)
     target_link_libraries(${exe} PRIVATE heongpu CUDA::cudart)
     set_target_properties(${exe} PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
-        POSITION_INDEPENDENT_CODE OFF
+        POSITION_INDEPENDENT_CODE ON
         CUDA_RUNTIME_LIBRARY Static
         CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
     )
