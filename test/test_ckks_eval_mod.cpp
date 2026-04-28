@@ -17,7 +17,6 @@ TEST(HEonGPU, CKKS_EvalMod)
         size_t poly_modulus_degree = 8192;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
 
@@ -152,7 +151,6 @@ TEST(HEonGPU, CKKS_EvalMod_SparesPacking)
 
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);

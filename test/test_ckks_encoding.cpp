@@ -286,7 +286,6 @@ TEST(HEonGPU, CKKS_Sparse_Encoding)
         int slot_count = poly_modulus_degree / 4;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);
@@ -354,7 +353,6 @@ TEST(HEonGPU, CKKS_Sparse_Encoding)
         int slot_count = poly_modulus_degree / 8;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);
@@ -427,7 +425,6 @@ TEST(HEonGPU, CKKS_RingT_Encoding_FullPacking)
         size_t poly_modulus_degree = 8192;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_coeff_modulus_bit_sizes({40, 30, 30, 30}, {40});
@@ -507,7 +504,6 @@ TEST(HEonGPU, CKKS_RingT_Encoding_SparsePacking)
         int slot_count = poly_modulus_degree / 4;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);
@@ -580,7 +576,6 @@ TEST(HEonGPU, CKKS_RingT_Encoding_SparsePacking)
         int slot_count = poly_modulus_degree / 8;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_I,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);

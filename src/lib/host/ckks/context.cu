@@ -64,10 +64,13 @@ namespace heongpu
                     "log_P_bases_bit_sizes cannot be empty!");
             }
 
-            keyswitching_type_ =
-                (log_P_bases_bit_sizes.size() == 1)
-                    ? keyswitching_type::KEYSWITCHING_METHOD_I
-                    : keyswitching_type::KEYSWITCHING_METHOD_II;
+            // @company CipherFlow
+            // Always use KEYSWITCHING_METHOD_II regardless of P count
+            // keyswitching_type_ =
+            //     (log_P_bases_bit_sizes.size() == 1)
+            //         ? keyswitching_type::KEYSWITCHING_METHOD_I
+            //         : keyswitching_type::KEYSWITCHING_METHOD_II;
+            keyswitching_type_ = keyswitching_type::KEYSWITCHING_METHOD_II;
 
             if (!coefficient_validator(log_Q_bases_bit_sizes,
                                        log_P_bases_bit_sizes))
@@ -173,10 +176,13 @@ namespace heongpu
                     "log_P_bases_bit_sizes cannot be empty!");
             }
 
-            keyswitching_type_ =
-                (log_P_bases_bit_sizes.size() == 1)
-                    ? keyswitching_type::KEYSWITCHING_METHOD_I
-                    : keyswitching_type::KEYSWITCHING_METHOD_II;
+            // @company CipherFlow
+            // Always use KEYSWITCHING_METHOD_II regardless of P count
+            // keyswitching_type_ =
+            //     (log_P_bases_bit_sizes.size() == 1)
+            //         ? keyswitching_type::KEYSWITCHING_METHOD_I
+            //         : keyswitching_type::KEYSWITCHING_METHOD_II;
+            keyswitching_type_ = keyswitching_type::KEYSWITCHING_METHOD_II;
 
             if (!coefficient_validator(log_Q_bases_bit_sizes,
                                        log_P_bases_bit_sizes))

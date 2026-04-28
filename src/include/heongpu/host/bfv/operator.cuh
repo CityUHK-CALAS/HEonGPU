@@ -580,19 +580,6 @@ namespace heongpu
                                         options.stream_);
 
                                     break;
-                                case 3: // KEYSWITCHING_METHOD_III
-
-                                    if (output_.in_ntt_domain_ != false)
-                                    {
-                                        throw std::invalid_argument(
-                                            "Ciphertext should be in intt "
-                                            "domain");
-                                    }
-
-                                    relinearize_external_product_method_inplace(
-                                        output_, relin_key, options.stream_);
-
-                                    break;
                                 default:
                                     throw std::invalid_argument(
                                         "Invalid Key Switching Type");

@@ -47,7 +47,6 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_FullPacking)
         size_t poly_modulus_degree = 8192;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
 
@@ -117,7 +116,7 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_FullPacking)
 
         // Encode coefficient-wise and encrypt
         heongpu::Plaintext<heongpu::Scheme::CKKS> plaintext(context);
-        encoder.encode_coeff(plaintext, values_float, scale);
+        encoder.encode(plaintext, values_float, scale, heongpu::ExecutionOptions(), heongpu::encoding::COEFFICIENT);
 
         heongpu::Ciphertext<heongpu::Scheme::CKKS> ciphertext(context);
         encryptor.encrypt(ciphertext, plaintext);
@@ -245,7 +244,6 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_FullPacking)
         size_t poly_modulus_degree = 8192;
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
 
@@ -311,7 +309,7 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_FullPacking)
         decryptor.decrypt(result_pt, result);
 
         std::vector<double> coeffs_float;
-        encoder.decode_coeff(coeffs_float, result_pt);
+        encoder.decode(coeffs_float, result_pt);
 
         // Extract the coefficients and construct the complex vector
         std::vector<Complex64> values_test(slot_count);
@@ -374,7 +372,6 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_SparsePacking)
 
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);
@@ -446,7 +443,7 @@ TEST(HEonGPU, CKKS_CoeffsToSlots_SparsePacking)
 
         // Encode coefficient-wise and encrypt
         heongpu::Plaintext<heongpu::Scheme::CKKS> plaintext(context);
-        encoder.encode_coeff(plaintext, values_float, scale);
+        encoder.encode(plaintext, values_float, scale, heongpu::ExecutionOptions(), heongpu::encoding::COEFFICIENT);
 
         heongpu::Ciphertext<heongpu::Scheme::CKKS> ciphertext(context);
         encryptor.encrypt(ciphertext, plaintext);
@@ -527,7 +524,6 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_SparsePacking)
 
         heongpu::HEContext<heongpu::Scheme::CKKS> context =
             heongpu::GenHEContext<heongpu::Scheme::CKKS>(
-                heongpu::keyswitching_type::KEYSWITCHING_METHOD_II,
                 heongpu::sec_level_type::none);
         context->set_poly_modulus_degree(poly_modulus_degree);
         context->set_slot_count(slot_count);
@@ -595,7 +591,7 @@ TEST(HEonGPU, CKKS_SlotsToCoeffs_SparsePacking)
         decryptor.decrypt(result_pt, result);
 
         std::vector<double> coeffs_float;
-        encoder.decode_coeff(coeffs_float, result_pt);
+        encoder.decode(coeffs_float, result_pt);
 
         // Extract with gap: real at [i*gap], imag at [N/2 + i*gap]
         int half_n = poly_modulus_degree / 2;

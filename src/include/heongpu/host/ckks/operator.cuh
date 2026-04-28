@@ -1160,10 +1160,6 @@ namespace heongpu
                                     relinearize_external_product_method2_ckks(
                                         input1_, output_, relin_key, options.stream_);
                                     break;
-                                case 3: // KEYSWITCHING_METHOD_III
-                                    relinearize_external_product_method_inplace_ckks(
-                                        input1_, relin_key, options.stream_);
-                                    break;
                                 default:
                                     throw std::invalid_argument(
                                         "Invalid Key Switching Type");

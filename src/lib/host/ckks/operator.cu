@@ -3164,27 +3164,50 @@ namespace heongpu
         std::vector<heongpu::DeviceVector<Data64>> result;
 
         int rns_count_base = start_level + 1;
+        int n = context_->n;
+        int Q_size = context_->Q_size;
+        int P_size = context_->P_size;
+        int Q_prime_size = context_->Q_prime_size;
 
         for (int m = 0; m < vandermonde.StoC_piece_; m++)
         {
             int current_rns_count = rns_count_base - m;
+            int pql_count = current_rns_count + P_size;
 
             heongpu::DeviceVector<Data64> temp_encoded(
-                (vandermonde.V_matrixs_index_[m].size() * current_rns_count)
+                (vandermonde.V_matrixs_index_[m].size() * pql_count)
                 << context_->n_power);
 
             double scale = static_cast<double>(context_->prime_vector_[current_rns_count-1].value);
+
+            // Temporary buffer for full Q_prime_size encoding
+            heongpu::DeviceVector<Data64> temp_full(
+                Q_prime_size << context_->n_power);
 
             for (int i = 0; i < vandermonde.V_matrixs_index_[m].size(); i++)
             {
                 int matrix_location = (i << vandermonde.log_dslots_);
                 int plaintext_location =
-                    ((i * current_rns_count) << context_->n_power);
+                    ((i * pql_count) << context_->n_power);
 
+                // Encode with all Q_prime_size primes
                 quick_ckks_encoder_vec_complex(
                     vandermonde.V_matrixs_rotated_[m].data() + matrix_location,
-                    temp_encoded.data() + plaintext_location, scale,
-                    current_rns_count);
+                    temp_full.data(), scale,
+                    Q_prime_size);
+
+                // Rearrange to PQ_l layout: [Q_0..Q_{cdc-1} | P_0..P_{P_size-1}]
+                // Copy Q limbs
+                cudaMemcpy(temp_encoded.data() + plaintext_location,
+                           temp_full.data(),
+                           current_rns_count * n * sizeof(Data64),
+                           cudaMemcpyDeviceToDevice);
+                // Copy P limbs
+                cudaMemcpy(temp_encoded.data() + plaintext_location +
+                               (current_rns_count * n),
+                           temp_full.data() + (Q_size * n),
+                           P_size * n * sizeof(Data64),
+                           cudaMemcpyDeviceToDevice);
             }
 
             result.push_back(std::move(temp_encoded));
@@ -3203,28 +3226,51 @@ namespace heongpu
         std::vector<heongpu::DeviceVector<Data64>> result;
 
         int rns_count_base = start_level + 1;
+        int n = context_->n;
+        int Q_size = context_->Q_size;
+        int P_size = context_->P_size;
+        int Q_prime_size = context_->Q_prime_size;
 
         for (int m = 0; m < vandermonde.CtoS_piece_; m++)
         {
             int current_rns_count = rns_count_base - m;
+            int pql_count = current_rns_count + P_size;
 
             heongpu::DeviceVector<Data64> temp_encoded(
-                (vandermonde.V_inv_matrixs_index_[m].size() * current_rns_count)
+                (vandermonde.V_inv_matrixs_index_[m].size() * pql_count)
                 << context_->n_power);
 
             double scale = static_cast<double>(context_->prime_vector_[current_rns_count-1].value);
+
+            // Temporary buffer for full Q_prime_size encoding
+            heongpu::DeviceVector<Data64> temp_full(
+                Q_prime_size << context_->n_power);
 
             for (int i = 0; i < vandermonde.V_inv_matrixs_index_[m].size(); i++)
             {
                 int matrix_location = (i << vandermonde.log_dslots_);
                 int plaintext_location =
-                    ((i * current_rns_count) << context_->n_power);
+                    ((i * pql_count) << context_->n_power);
 
+                // Encode with all Q_prime_size primes
                 quick_ckks_encoder_vec_complex(
                     vandermonde.V_inv_matrixs_rotated_[m].data() +
                         matrix_location,
-                    temp_encoded.data() + plaintext_location, scale,
-                    current_rns_count);
+                    temp_full.data(), scale,
+                    Q_prime_size);
+
+                // Rearrange to PQ_l layout: [Q_0..Q_{cdc-1} | P_0..P_{P_size-1}]
+                // Copy Q limbs
+                cudaMemcpy(temp_encoded.data() + plaintext_location,
+                           temp_full.data(),
+                           current_rns_count * n * sizeof(Data64),
+                           cudaMemcpyDeviceToDevice);
+                // Copy P limbs
+                cudaMemcpy(temp_encoded.data() + plaintext_location +
+                               (current_rns_count * n),
+                           temp_full.data() + (Q_size * n),
+                           P_size * n * sizeof(Data64),
+                           cudaMemcpyDeviceToDevice);
             }
 
             result.push_back(std::move(temp_encoded));
