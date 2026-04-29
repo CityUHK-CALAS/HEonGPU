@@ -2247,15 +2247,18 @@ namespace heongpu
 
         __host__ void quick_ckks_encoder_constant_complex(Complex64 input,
                                                           Data64* output,
-                                                          const double scale);
+                                                          const double scale,
+                                                          cudaStream_t stream = 0); // @company CipherFlow: stream parameter
 
         __host__ void quick_ckks_encoder_constant_double(double input,
                                                          Data64* output,
-                                                         const double scale);
+                                                         const double scale,
+                                                         cudaStream_t stream = 0); // @company CipherFlow: stream parameter
 
         __host__ void quick_ckks_encoder_constant_integer(std::int64_t input,
                                                           Data64* output,
-                                                          const double scale);
+                                                          const double scale,
+                                                          cudaStream_t stream = 0); // @company CipherFlow: stream parameter
 
         __host__ std::vector<heongpu::DeviceVector<Data64>>
         encode_V_matrixs(Vandermonde& vandermonde, const double scale,

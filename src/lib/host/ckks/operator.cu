@@ -681,8 +681,8 @@ namespace heongpu
             imag_rns_host[i] = NTL::to_long(imag_mod);
         }
 
-        DeviceVector<Data64> real_rns = DeviceVector<Data64>(real_rns_host);
-        DeviceVector<Data64> imag_rns = DeviceVector<Data64>(imag_rns_host);
+        DeviceVector<Data64> real_rns = DeviceVector<Data64>(real_rns_host, stream); // @company CipherFlow: stream
+        DeviceVector<Data64> imag_rns = DeviceVector<Data64>(imag_rns_host, stream); // @company CipherFlow: stream
 
         cipher_add_by_gaussian_integer_kernel<<<
             dim3((context_->n >> 8), current_decomp_count, cipher_size), 256, 0,
@@ -774,8 +774,8 @@ namespace heongpu
             imag_rns_host[i] = NTL::to_long(imag_mod);
         }
 
-        DeviceVector<Data64> real_rns = DeviceVector<Data64>(real_rns_host);
-        DeviceVector<Data64> imag_rns = DeviceVector<Data64>(imag_rns_host);
+        DeviceVector<Data64> real_rns = DeviceVector<Data64>(real_rns_host, stream); // @company CipherFlow: stream
+        DeviceVector<Data64> imag_rns = DeviceVector<Data64>(imag_rns_host, stream); // @company CipherFlow: stream
 
         cipher_mult_by_gaussian_integer_kernel<<<
             dim3((context_->n >> 8), current_decomp_count, cipher_size), 256, 0,
@@ -2879,7 +2879,8 @@ namespace heongpu
     }
 
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_constant_complex(
-        Complex64 input, Data64* output, const double scale)
+        Complex64 input, Data64* output, const double scale,
+        cudaStream_t stream) // @company CipherFlow
     {
         // std::vector<Complex64> in = {input};
         std::vector<Complex64> in;
@@ -2887,9 +2888,9 @@ namespace heongpu
         {
             in.push_back(input);
         }
-        DeviceVector<Complex64> message_gpu(slot_count_);
-        cudaMemcpy(message_gpu.data(), in.data(), in.size() * sizeof(Complex64),
-                   cudaMemcpyHostToDevice);
+        DeviceVector<Complex64> message_gpu(slot_count_, stream); // @company CipherFlow
+        cudaMemcpyAsync(message_gpu.data(), in.data(), in.size() * sizeof(Complex64),
+                        cudaMemcpyHostToDevice, stream); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         double fix = scale / static_cast<double>(slot_count_);
@@ -2898,66 +2899,68 @@ namespace heongpu
         cfg_ifft.n_power = log_slot_count_;
         cfg_ifft.fft_type = gpufft::type::INVERSE;
         cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = 0;
+        cfg_ifft.stream = stream; // @company CipherFlow
 
         gpufft::GPU_Special_FFT(message_gpu.data(),
                                 special_ifft_roots_table_->data(), cfg_ifft, 1);
 
-        int log_sparse_n = log_slot_count_ + 1; // @company CipherFlow 
+        int log_sparse_n = log_slot_count_ + 1; // @company CipherFlow
 
-        // @company CipherFlow 
+        // @company CipherFlow
         // When gap_ > 1 (sparse), use a temp compact buffer; otherwise write directly.
         DeviceVector<Data64> compact_buf;
         Data64* compact = output;
         if (gap_ > 1)
         {
-            compact_buf = DeviceVector<Data64>((1 << log_sparse_n) * context_->Q_size);
+            compact_buf = DeviceVector<Data64>((1 << log_sparse_n) * context_->Q_size, stream); 
             compact = compact_buf.data();
         }
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256>>>(
+        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0, stream>>>( // @company CipherFlow
             compact, message_gpu.data(), context_->modulus_->data(), context_->Q_size, two_pow_64_,
-            reverse_order_->data(), log_sparse_n); // @company CipherFlow 
+            reverse_order_->data(), log_sparse_n); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         gpuntt::ntt_rns_configuration<Data64> cfg_ntt = {
-            .n_power = log_sparse_n, // @company CipherFlow 
+            .n_power = log_sparse_n, // @company CipherFlow
             .ntt_type = gpuntt::FORWARD,
             .ntt_layout = gpuntt::PerPolynomial,
             .reduction_poly = gpuntt::ReductionPolynomial::X_N_plus,
             .zero_padding = false,
-            .stream = 0};
+            .stream = stream}; // @company CipherFlow
 
-        gpuntt::GPU_NTT_Inplace(compact, context_->ntt_table_slot_->data(), // @company CipherFlow 
+        gpuntt::GPU_NTT_Inplace(compact, context_->ntt_table_slot_->data(), // @company CipherFlow
                                 context_->modulus_->data(), cfg_ntt, context_->Q_size, context_->Q_size);
-        // @company CipherFlow 
+        // @company CipherFlow
         if (gap_ > 1)
         {
-            sparse_ntt_expand_kernel<<<dim3((context_->n >> 8), context_->Q_size, 1), 256>>>(
+            sparse_ntt_expand_kernel<<<dim3((context_->n >> 8), context_->Q_size, 1), 256, 0, stream>>>(
                 output, compact, log_slot_count_, context_->n_power, context_->Q_size);
             HEONGPU_CUDA_CHECK(cudaGetLastError());
         }
     }
 
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_constant_double(
-        double input, Data64* output, const double scale)
+        double input, Data64* output, const double scale,
+        cudaStream_t stream) // @company CipherFlow
     {
         double value = input * scale;
 
         encode_kernel_double_ckks_conversion<<<dim3((context_->n >> 8), 1, 1),
-                                               256>>>(
+                                               256, 0, stream>>>( // @company CipherFlow
             output, value, context_->modulus_->data(), context_->Q_size,
             two_pow_64_, context_->n_power);
         HEONGPU_CUDA_CHECK(cudaGetLastError());
     }
 
     __host__ void HEOperator<Scheme::CKKS>::quick_ckks_encoder_constant_integer(
-        std::int64_t input, Data64* output, const double scale)
+        std::int64_t input, Data64* output, const double scale,
+        cudaStream_t stream) // @company CipherFlow
     {
         double value = static_cast<double>(input) * scale;
 
         encode_kernel_double_ckks_conversion<<<dim3((context_->n >> 8), 1, 1),
-                                               256>>>(
+                                               256, 0, stream>>>( // @company CipherFlow
             output, value, context_->modulus_->data(), context_->Q_size,
             two_pow_64_, context_->n_power);
         HEONGPU_CUDA_CHECK(cudaGetLastError());
@@ -3418,7 +3421,7 @@ namespace heongpu
             for (int k = 0; k < P_size; k++)
                 pq_mod_host[current_decomp_count + k] =
                     context_->prime_vector_[Q_size + k];
-            DeviceVector<Modulus64> pq_modulus_dev(pq_mod_host);
+            DeviceVector<Modulus64> pq_modulus_dev(pq_mod_host, stream); // @company CipherFlow: stream
 
             // Compute P mod q_j for each active Q prime
             std::vector<Data64> P_mod_q_host(current_decomp_count);
@@ -3437,7 +3440,7 @@ namespace heongpu
                 }
                 P_mod_q_host[j] = p_mod_qj;
             }
-            DeviceVector<Data64> P_mod_q_dev(P_mod_q_host);
+            DeviceVector<Data64> P_mod_q_dev(P_mod_q_host, stream); // @company CipherFlow: stream
 
             // ============================================================
             // NTT location for PQ_l
@@ -4759,12 +4762,12 @@ namespace heongpu
         double prev_scale = cipher.scale_;
         Ciphertext<Scheme::CKKS> cipher_taylor = cipher;
         cipher_taylor.scale_ = eval_mod_config_.scaling_factor_;
-        
+
         double target_scale = eval_mod_config_.scaling_factor_;
-        for (int i = 0; i < eval_mod_config_.double_angle_; i++) 
+        for (int i = 0; i < eval_mod_config_.double_angle_; i++)
         {
-            int modulus_index = eval_mod_config_.level_start_ - 
-                                sine_poly_.depth() - 
+            int modulus_index = eval_mod_config_.level_start_ -
+                                sine_poly_.depth() -
                                 eval_mod_config_.double_angle_ + i + 1;
             Data64 qi = context_->prime_vector_[modulus_index].value;
             target_scale = std::sqrt(target_scale * static_cast<double>(qi));
@@ -4778,7 +4781,7 @@ namespace heongpu
 
         cipher_taylor = evaluate_poly(cipher_taylor, target_scale, sine_poly_,
                                       relin_key, options);
-        
+
         double sqrt2pi = eval_mod_config_.sqrt2pi_;
         for (int i = 0; i < eval_mod_config_.double_angle_; i++)
         {
@@ -4934,15 +4937,17 @@ namespace heongpu
 
         add_plain_v2(result, pol.coeffs_[0], result, options);
 
-        for (int i = 1; i <= pol.degree(); i++) 
+        for (int i = 1; i <= pol.degree(); i++)
         {
             Ciphertext<Scheme::CKKS> xi_term = powered_ciphers[i];
 
             DeviceVector<Data64> encoded_coeff_i(context_->Q_size
-                                                 << context_->n_power);
+                                                 << context_->n_power,
+                                                 options.stream_); // @company CipherFlow 
             quick_ckks_encoder_constant_complex(pol.coeffs_[i],
                                                 encoded_coeff_i.data(),
-                                                target_scale / xi_term.scale_);
+                                                target_scale / xi_term.scale_,
+                                                options.stream_); // @company CipherFlow
             HEONGPU_CUDA_CHECK(cudaGetLastError());
 
             int current_decomp_count = context_->Q_size - xi_term.depth_;
@@ -5149,7 +5154,7 @@ namespace heongpu
         int log_split = optimal_split(log_degree);
 
         // Baby-step: Generate powers x^1, x^2, ..., x^(2^logSplit - 1)
-        for (int power = (1 << log_split) - 1; power >= 1; power--) 
+        for (int power = (1 << log_split) - 1; power >= 1; power--)
         {
             gen_power(powered_ciphers, power, relin_key, options);
         }

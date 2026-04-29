@@ -865,11 +865,11 @@ namespace heongpu
 
     // Find the N1 and N2 split that gives the closest ratio to the desired
     // ratio
+    // @company CipherFlow
     int find_best_bsgs_split(const std::vector<int>& array, int max_N,
                              float bsgs_ratio)
     {
-        int best_N1 = 1;
-        float best_diff = std::numeric_limits<float>::max();
+        const float epsilon = 1e-8f;
 
         for (int N1 = 1; N1 < max_N; N1 <<= 1)
         {
@@ -877,21 +877,49 @@ namespace heongpu
             std::vector<int> rot_n2;
             bsgs_index(array, N1, rot_n1, rot_n2);
 
-            if (rot_n1.size() <= 1 || rot_n2.size() <= 1)
-                continue;
+            float current_ratio =
+                float(rot_n2.size() - 1) / float(rot_n1.size() - 1);
 
-            float current_ratio = float(rot_n2.size()) / float(rot_n1.size());
-            float diff = std::abs(current_ratio - bsgs_ratio);
-
-            if (diff < best_diff)
+            if (std::abs(current_ratio - bsgs_ratio) < epsilon)
             {
-                best_diff = diff;
-                best_N1 = N1;
+                return N1;
+            }
+            if (current_ratio > bsgs_ratio)
+            {
+                return N1 / 2;
             }
         }
 
-        return best_N1;
+        return 1;
     }
+
+    // int find_best_bsgs_split(const std::vector<int>& array, int max_N,
+    //                          float bsgs_ratio)
+    // {
+    //     int best_N1 = 1;
+    //     float best_diff = std::numeric_limits<float>::max();
+    //
+    //     for (int N1 = 1; N1 < max_N; N1 <<= 1)
+    //     {
+    //         std::vector<int> rot_n1;
+    //         std::vector<int> rot_n2;
+    //         bsgs_index(array, N1, rot_n1, rot_n2);
+    //
+    //         if (rot_n1.size() <= 1 || rot_n2.size() <= 1)
+    //             continue;
+    //
+    //         float current_ratio = float(rot_n2.size()) / float(rot_n1.size());
+    //         float diff = std::abs(current_ratio - bsgs_ratio);
+    //
+    //         if (diff < best_diff)
+    //         {
+    //             best_diff = diff;
+    //             best_N1 = N1;
+    //         }
+    //     }
+    //
+    //     return best_N1;
+    // }
 
     // Find a good N1 and N2 split as close as possible to the desired ratio
     std::vector<std::vector<int>> seperate_func_v2(const std::vector<int>& A,
