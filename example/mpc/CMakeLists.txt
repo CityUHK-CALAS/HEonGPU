@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Alişah Özcan
+# Copyright 2024-2026 Alişah Özcan
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 # Developer: Alişah Özcan
@@ -6,10 +6,10 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/examples/mpc)
 
 set(EXECUTABLES
-    1_multiparty_computation_bfv 1_multiparty_computation_bfv.cu
-    2_multiparty_computation_ckks 2_multiparty_computation_ckks.cu
-    3_mpc_collective_bootstrapping_bfv 3_mpc_collective_bootstrapping_bfv.cu
-    4_mpc_collective_bootstrapping_ckks 4_mpc_collective_bootstrapping_ckks.cu
+    1_multiparty_computation_bfv 1_multiparty_computation_bfv.cpp
+    2_multiparty_computation_ckks 2_multiparty_computation_ckks.cpp
+    3_mpc_collective_bootstrapping_bfv 3_mpc_collective_bootstrapping_bfv.cpp
+    4_mpc_collective_bootstrapping_ckks 4_mpc_collective_bootstrapping_ckks.cpp
 )
 
 function(add_example exe source)
@@ -18,7 +18,7 @@ function(add_example exe source)
     target_compile_options(${exe} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp>)
     set_target_properties(${exe} PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
-        POSITION_INDEPENDENT_CODE OFF
+        POSITION_INDEPENDENT_CODE ON
         CUDA_RUNTIME_LIBRARY Static
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
     )

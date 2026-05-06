@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Alişah Özcan
+# Copyright 2024-2026 Alişah Özcan
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 # Developer: Alişah Özcan
@@ -6,18 +6,21 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/examples/basic)
 
 set(EXECUTABLES
-    1_basic_bfv 1_basic_bfv.cu
-    2_basic_ckks 2_basic_ckks.cu
-    3_switchkey_methods_bfv 3_switchkey_methods_bfv.cu
-    4_switchkey_methods_ckks 4_switchkey_methods_ckks.cu
-    5_default_stream_usage 5_default_stream_usage.cu
-    6_multi_stream_usage_way1 6_multi_stream_usage_way1.cu
-    7_multi_stream_usage_way2 7_multi_stream_usage_way2.cu
-    8_basic_bfv_logic 8_basic_bfv_logic.cu
-    9_basic_ckks_logic 9_basic_ckks_logic.cu
-    10_bfv_serialization 10_bfv_serialization.cu
-    11_ckks_serialization 11_ckks_serialization.cu
-    12_basic_tfhe 12_basic_tfhe.cu
+    1_basic_bfv 1_basic_bfv.cpp
+    2_basic_ckks 2_basic_ckks.cpp
+    3_basic_memorypool_config 3_basic_memorypool_config.cpp
+    4_switchkey_methods_bfv 4_switchkey_methods_bfv.cpp
+    5_switchkey_methods_ckks 5_switchkey_methods_ckks.cpp
+    6_ckks_coefficient_encoding 6_ckks_coefficient_encoding.cpp
+    7_ckks_coeff_to_slot_roundtrip 7_ckks_coeff_to_slot_roundtrip.cpp
+    8_default_stream_usage 8_default_stream_usage.cpp
+    9_multi_stream_usage_way1 9_multi_stream_usage_way1.cpp
+    10_multi_stream_usage_way2 10_multi_stream_usage_way2.cpp
+    11_basic_bfv_logic 11_basic_bfv_logic.cpp
+    12_basic_ckks_logic 12_basic_ckks_logic.cpp
+    13_bfv_serialization 13_bfv_serialization.cpp
+    14_ckks_serialization 14_ckks_serialization.cpp
+    15_basic_tfhe 15_basic_tfhe.cpp
 )
 
 function(add_example exe source)
@@ -26,7 +29,7 @@ function(add_example exe source)
     target_compile_options(${exe} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp>)
     set_target_properties(${exe} PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
-        POSITION_INDEPENDENT_CODE OFF
+        POSITION_INDEPENDENT_CODE ON
         CUDA_RUNTIME_LIBRARY Static
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
     )

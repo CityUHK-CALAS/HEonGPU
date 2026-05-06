@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Alişah Özcan
+# Copyright 2024-2026 Alişah Özcan
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 # Developer: Alişah Özcan
@@ -6,11 +6,11 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/examples/bootstrapping)
 
 set(EXECUTABLES
-    1_ckks_regular_bootstrapping 1_ckks_regular_bootstrapping.cu
-    2_ckks_slim_bootstrapping 2_ckks_slim_bootstrapping.cu
-    3_ckks_bit_bootstrapping 3_ckks_bit_bootstrapping.cu
-    4_ckks_gate_bootstrapping 4_ckks_gate_bootstrapping.cu
-    5_ckks_regular_bootstrapping_v2 5_ckks_regular_bootstrapping_v2.cu
+    1_ckks_regular_bootstrapping 1_ckks_regular_bootstrapping.cpp
+    2_ckks_slim_bootstrapping 2_ckks_slim_bootstrapping.cpp
+    3_ckks_bit_bootstrapping 3_ckks_bit_bootstrapping.cpp
+    4_ckks_gate_bootstrapping 4_ckks_gate_bootstrapping.cpp
+    5_ckks_regular_bootstrapping_v2 5_ckks_regular_bootstrapping_v2.cpp
 )
 
 function(add_example exe source)
@@ -19,7 +19,7 @@ function(add_example exe source)
     target_compile_options(${exe} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp>)
     set_target_properties(${exe} PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
-        POSITION_INDEPENDENT_CODE OFF
+        POSITION_INDEPENDENT_CODE ON
         CUDA_RUNTIME_LIBRARY Static
         CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
     )
