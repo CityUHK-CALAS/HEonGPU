@@ -1,0 +1,191 @@
+diff --git a/src/include/gpufft/fft.cuh b/src/include/gpufft/fft.cuh
+index 2d65449..f04aeda 100644
+--- a/src/include/gpufft/fft.cuh
++++ b/src/include/gpufft/fft.cuh
+@@ -191,6 +191,21 @@ namespace gpufft
+                         int shared_index, int logm, int outer_iteration_count,
+                         int N_power, COMPLEX<T> n_inverse,
+                         bool not_last_kernel);
++
++    // Single-block kernels for n_power in [4, 10]. The full FFT fits in one
++    // shared-memory tile so the multi-launch chain used by the big-N kernels
++    // is unnecessary. Same Gentleman-Sande / Cooley-Tukey butterflies, same
++    // ordered-root layout (root index = m + (idx & (m-1))).
++    template <typename T>
++    __global__ void Special_InverseCore_Small(
++        COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table, int N_power,
++        COMPLEX<T> n_inverse);
++
++    template <typename T>
++    __global__ void Special_ForwardCore_Small(
++        COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
++        int N_power);
++
+     template <typename T>
+     __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
+                                   COMPLEX<T>* root_of_unity_table,
+diff --git a/src/lib/fft.cu b/src/lib/fft.cu
+index 797e6e0..603e9d8 100644
+--- a/src/lib/fft.cu
++++ b/src/lib/fft.cu
+@@ -925,16 +925,132 @@ namespace gpufft
+             shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+     }
+ 
++    // Single-block IFFT for n_power in [1, 10]. Loads the full FFT into
++    // shared memory, runs all log2(N) Gentleman-Sande stages in-place,
++    // multiplies by n_inverse on writeback. Each thread handles one
++    // butterfly per stage (blockDim.x = N/2). Reuses the same ordered-root
++    // layout (root_idx = m + (idx & (m-1))) as Special_InverseCore so it
++    // shares the existing root table.
++    template <typename T>
++    __global__ void
++    Special_InverseCore_Small(COMPLEX<T>* polynomial,
++                              COMPLEX<T>* root_of_unity_table, int N_power,
++                              COMPLEX<T> n_inverse)
++    {
++        extern __shared__ char shared_memory_typed[];
++        COMPLEX<T>* shared_memory =
++            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
++
++        const int idx = threadIdx.x;
++        const int N = 1 << N_power;
++        const int half = N >> 1;
++        const location_t batch_offset =
++            (location_t) blockIdx.z << N_power;
++
++        shared_memory[idx] = polynomial[batch_offset + idx];
++        shared_memory[idx + half] = polynomial[batch_offset + idx + half];
++        __syncthreads();
++
++        int m = half;     // distinct-roots count for this stage
++        int t = half;     // butterfly stride
++        int t_log = N_power - 1; // log2(t)
++        for (int s = 0; s < N_power; s++)
++        {
++            const int pair_base = ((idx >> t_log) << t_log) + idx;
++            const int root_idx = m + (idx & (m - 1));
++            GentlemanSandeUnit<T>(shared_memory[pair_base],
++                                  shared_memory[pair_base + t],
++                                  root_of_unity_table[root_idx]);
++            m >>= 1;
++            t >>= 1;
++            t_log -= 1;
++            __syncthreads();
++        }
++
++        polynomial[batch_offset + idx] = shared_memory[idx] * n_inverse;
++        polynomial[batch_offset + idx + half] =
++            shared_memory[idx + half] * n_inverse;
++    }
++
++    // Single-block forward FFT for n_power in [1, 10]. Mirrors
++    // Special_ForwardCore but does all stages in one launch since N <= 1024
++    // fits in shared memory.
++    template <typename T>
++    __global__ void Special_ForwardCore_Small(
++        COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
++        int N_power)
++    {
++        extern __shared__ char shared_memory_typed[];
++        COMPLEX<T>* shared_memory =
++            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
++
++        const int idx = threadIdx.x;
++        const int N = 1 << N_power;
++        const int half = N >> 1;
++        const location_t batch_offset =
++            (location_t) blockIdx.z << N_power;
++
++        shared_memory[idx] = polynomial[batch_offset + idx];
++        shared_memory[idx + half] = polynomial[batch_offset + idx + half];
++        __syncthreads();
++
++        // Cooley-Tukey: m doubles each stage, t doubles each stage.
++        int m = 1;
++        int t = 1;
++        int t_log = 0;
++        for (int s = 0; s < N_power; s++)
++        {
++            const int pair_base = ((idx >> t_log) << t_log) + idx;
++            const int root_idx = m + (idx & (m - 1));
++            CooleyTukeyUnit<T>(shared_memory[pair_base],
++                               shared_memory[pair_base + t],
++                               inverse_root_of_unity_table[root_idx]);
++            m <<= 1;
++            t <<= 1;
++            t_log += 1;
++            __syncthreads();
++        }
++
++        polynomial[batch_offset + idx] = shared_memory[idx];
++        polynomial[batch_offset + idx + half] = shared_memory[idx + half];
++    }
++
+     template <typename T>
+     __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
+                                   COMPLEX<T>* root_of_unity_table,
+                                   fft_configuration<T> cfg, int batch_size)
+     {
+-        if ((cfg.n_power <= 10 || cfg.n_power >= 25))
++        if ((cfg.n_power < 1 || cfg.n_power >= 25))
+         {
+             throw std::invalid_argument("Invalid n_power range!");
+         }
+ 
++        // Single-block path for n_power in [1, 10]. Avoids the multi-launch
++        // chain entirely; existing big-N kernel and its kernel-table
++        // dispatch are unchanged below.
++        if (cfg.n_power <= 10)
++        {
++            const int N = 1 << cfg.n_power;
++            const int threads = N >> 1; // >= 1 (n_power >= 1)
++            const size_t shared = N * sizeof(COMPLEX<T>);
++            if (cfg.fft_type == INVERSE)
++            {
++                Special_InverseCore_Small<T>
++                    <<<dim3(1, 1, batch_size), dim3(threads), shared,
++                       cfg.stream>>>(device_inout, root_of_unity_table,
++                                     cfg.n_power, cfg.mod_inverse);
++            }
++            else
++            {
++                Special_ForwardCore_Small<T>
++                    <<<dim3(1, 1, batch_size), dim3(threads), shared,
++                       cfg.stream>>>(device_inout, root_of_unity_table,
++                                     cfg.n_power);
++            }
++            GPUFFT_CUDA_CHECK(cudaGetLastError());
++            return;
++        }
++
+         auto kernel_parameters = (cfg.fft_type == FORWARD)
+                                      ? CreateForwardSpecialFFTKernel<T>()
+                                      : CreateInverseSpecialFFTKernel<T>();
+@@ -1614,6 +1730,26 @@ namespace gpufft
+                         int shared_index, int logm, int outer_iteration_count,
+                         int N_power, Complex64 n_inverse, bool not_last_kernel);
+ 
++    template __global__ void
++    Special_InverseCore_Small(Complex32* polynomial,
++                              Complex32* root_of_unity_table, int N_power,
++                              Complex32 n_inverse);
++
++    template __global__ void
++    Special_InverseCore_Small(Complex64* polynomial,
++                              Complex64* root_of_unity_table, int N_power,
++                              Complex64 n_inverse);
++
++    template __global__ void
++    Special_ForwardCore_Small(Complex32* polynomial,
++                              Complex32* inverse_root_of_unity_table,
++                              int N_power);
++
++    template __global__ void
++    Special_ForwardCore_Small(Complex64* polynomial,
++                              Complex64* inverse_root_of_unity_table,
++                              int N_power);
++
+     template __host__ void GPU_Special_FFT(Complex32* device_inout,
+                                            Complex32* root_of_unity_table,
+                                            fft_configuration<Float32> cfg,

@@ -235,12 +235,17 @@ namespace heongpu
         Complex64* complex_message, Data64* plaintext, Modulus64* modulus,
         Data64* Mi_inv, Data64* Mi, Data64* upper_half_threshold,
         Data64* decryption_modulus, int coeff_modulus_count, double scale,
-        double two_pow_64, int* reverse_order, int n_power, int gap) // @company CipherFlow
+        double two_pow_64, int* reverse_order, int n_power, int gap)
     {
         int idx = blockIdx.x * blockDim.x + threadIdx.x; // slot_count
         double inv_scale = double(1.0) / scale;
         double two_pow_64_reg = two_pow_64;
-        int offset = 1 << (n_power - 1); 
+        int offset = 1 << (n_power - 1);
+        // @company CipherFlow: in sparse mode (gap > 1) the temp_plain after
+        // full-N INTT has nonzero coefficients only at every gap-th position;
+        // read at stride gap so each thread fetches the live coefficient for
+        // its slot.
+        int idx_strided = idx * gap;
 
         Data64 compose_result[50]; // TODO: Define size as global variable
         Data64 big_integer_result[50]; // TODO: Define size as global variable
@@ -250,7 +255,7 @@ namespace heongpu
 #pragma unroll
         for (int i = 0; i < coeff_modulus_count; i++)
         {
-            Data64 base = plaintext[idx * gap + (i << n_power)]; // @company CipherFlow
+            Data64 base = plaintext[idx_strided + (i << n_power)];
             Data64 temp = OPERATOR_GPU_64::mult(base, Mi_inv[i], modulus[i]);
 
             biginteger::multiply(Mi + (i * coeff_modulus_count),
@@ -318,7 +323,7 @@ namespace heongpu
 #pragma unroll
         for (int i = 0; i < coeff_modulus_count; i++)
         {
-            Data64 base = plaintext[idx * gap + offset + (i << n_power)]; // @company CipherFlow
+            Data64 base = plaintext[idx_strided + offset + (i << n_power)];
             Data64 temp = OPERATOR_GPU_64::mult(base, Mi_inv[i], modulus[i]);
 
             biginteger::multiply(Mi + (i * coeff_modulus_count),

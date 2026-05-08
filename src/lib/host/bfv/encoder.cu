@@ -278,9 +278,9 @@ namespace heongpu
             message_gpu, temp_plain, encoding_location_->data());
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        unsigned_signed_convert<<<dim3((slot_count >> 8), 1, 1), 256, 0,
-                                  stream>>>(message_gpu, message_gpu,
-                                            ctx->plain_modulus2_->data());
+        unsigned_signed_convert<<<slot_kernel_grid(slot_count),
+                                  slot_kernel_block(slot_count), 0, stream>>>(
+            message_gpu, message_gpu, ctx->plain_modulus2_->data());
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         message.resize(slot_count);
@@ -359,9 +359,9 @@ namespace heongpu
             message_gpu, temp_plain, encoding_location_->data());
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        unsigned_signed_convert<<<dim3((slot_count >> 8), 1, 1), 256, 0,
-                                  stream>>>(message_gpu, message_gpu,
-                                            ctx->plain_modulus2_->data());
+        unsigned_signed_convert<<<slot_kernel_grid(slot_count),
+                                  slot_kernel_block(slot_count), 0, stream>>>(
+            message_gpu, message_gpu, ctx->plain_modulus2_->data());
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         message.resize(slot_count);

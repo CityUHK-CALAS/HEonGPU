@@ -29,7 +29,20 @@ FetchContent_Declare(
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(rmm)
 
-add_subdirectory(GPU-FFT)
-add_subdirectory(GPU-NTT)
+# GPU-FFT and GPU-NTT are consumed from build-dir copies populated by
+# heongpu_apply_patch() in the parent CMakeLists.txt; this keeps the source
+# submodules clean and decouples patch application from source location.
+# Fall back to the in-tree submodule when the patched copy variable is unset
+# (e.g. someone includes thirdparty/ directly in another build).
+if(DEFINED HEONGPU_GPU_FFT_PATCHED_DIR)
+    add_subdirectory("${HEONGPU_GPU_FFT_PATCHED_DIR}" GPU-FFT)
+else()
+    add_subdirectory(GPU-FFT)
+endif()
+if(DEFINED HEONGPU_GPU_NTT_PATCHED_DIR)
+    add_subdirectory("${HEONGPU_GPU_NTT_PATCHED_DIR}" GPU-NTT)
+else()
+    add_subdirectory(GPU-NTT)
+endif()
 add_subdirectory(RNGonGPU)
 

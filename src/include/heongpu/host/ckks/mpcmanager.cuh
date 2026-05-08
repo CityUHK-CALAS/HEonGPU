@@ -635,7 +635,6 @@ namespace heongpu
         HEContext<Scheme::CKKS> context_;
         int slot_count_;
 
-        int gap_; // @company CipherFlow
         double scale_;
         double two_pow_64;
         int log_slot_count_;

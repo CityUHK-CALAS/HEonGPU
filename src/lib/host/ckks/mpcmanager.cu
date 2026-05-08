@@ -1593,7 +1593,7 @@ namespace heongpu
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         DeviceVector<Complex64> temp_complex(context_->n, stream);
-        double_to_complex_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        double_to_complex_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(random_message_gpu.data(),
                                              temp_complex.data());
 
@@ -1611,7 +1611,7 @@ namespace heongpu
         DeviceVector<Data64> random_message_rns_gpu(
             context_->n * context_->Q_size, stream);
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             random_message_rns_gpu.data(), temp_complex.data(),
             context_->modulus_->data(), context_->Q_size, two_pow_64,
@@ -1811,7 +1811,7 @@ namespace heongpu
         }
 
         DeviceVector<Complex64> temp_complex(context_->n, stream);
-        encode_kernel_compose<<<dim3((slot_count_ >> 8), 1, 1), 256, 0,
+        encode_kernel_compose<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                 stream>>>(
             temp_complex.data(), rand_message_memory.data(),
             context_->modulus_->data(), context_->Mi_inv_->data() + location1,
@@ -1819,7 +1819,8 @@ namespace heongpu
             context_->upper_half_threshold_->data() + location1,
             context_->decryption_modulus_->data() + location1,
             current_decomp_count, common.scale_, two_pow_64,
-            reverse_order->data(), context_->n_power, gap_); // @company CipherFlow
+            reverse_order->data(), context_->n_power,
+            /*gap=*/1); // @company CipherFlow: multiparty not sparse-aware
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         gpufft::fft_configuration<Float64> cfg_fft{};
@@ -1830,7 +1831,7 @@ namespace heongpu
         gpufft::GPU_Special_FFT(temp_complex.data(),
                                 special_fft_roots_table_->data(), cfg_fft, 1);
 
-        complex_to_double_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        complex_to_double_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(temp_complex.data(),
                                              message_gpu.data());
         HEONGPU_CUDA_CHECK(cudaGetLastError());
@@ -1844,7 +1845,7 @@ namespace heongpu
         Data64* o_c1 =
             output_memory.data() + (context_->Q_size << context_->n_power);
 
-        double_to_complex_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        double_to_complex_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(message_gpu.data(),
                                              temp_complex.data());
 
@@ -1859,7 +1860,7 @@ namespace heongpu
         gpufft::GPU_Special_FFT(temp_complex.data(),
                                 special_ifft_roots_table_->data(), cfg_ifft, 1);
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             o_c0, temp_complex.data(), context_->modulus_->data(),
             context_->Q_size, two_pow_64, reverse_order->data(),

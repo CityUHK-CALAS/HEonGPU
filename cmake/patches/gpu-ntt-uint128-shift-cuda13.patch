@@ -1,0 +1,34 @@
+diff --git a/src/include/gpuntt/common/modular_arith.cuh b/src/include/gpuntt/common/modular_arith.cuh
+index 333ddfb..022acb0 100644
+--- a/src/include/gpuntt/common/modular_arith.cuh
++++ b/src/include/gpuntt/common/modular_arith.cuh
+@@ -226,9 +226,26 @@ namespace modular_operation_gpu
+             {
+                 uint128_t result;
+ 
+-                result.value.x = value.x >> shift;
+-                result.value.x = (value.y << (64 - shift)) | result.value.x;
+-                result.value.y = value.y >> shift;
++                // Guard against shift>=64: `uint64_t >> N` is UB for N >= 64.
++                // Pre-CUDA-13 codegen returned 0; CUDA 13 returns the unshifted
++                // value, miscompiling Barrett reduction for any prime with
++                // bit_count >= 61 (where `bit + 3` hits 64).
++                if (shift >= 64)
++                {
++                    result.value.x = value.y >> (shift - 64);
++                    result.value.y = 0;
++                }
++                else if (shift == 0)
++                {
++                    result.value.x = value.x;
++                    result.value.y = value.y;
++                }
++                else
++                {
++                    result.value.x =
++                        (value.y << (64 - shift)) | (value.x >> shift);
++                    result.value.y = value.y >> shift;
++                }
+ 
+                 return result;
+             }

@@ -110,6 +110,25 @@ set(RNGonGPU_USE_INTERNAL_GPUNTT
     OFF CACHE BOOL
     "Force using global GPU-NTT (thirdparty/GPU-NTT) instead of RNGonGPU's internal" FORCE)
 
+# Carry-only patches against thirdparty submodules. Patches are applied to a
+# build-dir copy so the source submodules (thirdparty/GPU-NTT,
+# thirdparty/GPU-FFT) stay clean and source-archive / vendored builds work
+# without a `.git` directory present.
+#   - gpu-ntt-uint128-shift-cuda13.patch: guards the uint128_t::operator>> UB
+#     that CUDA 13 codegen exposes for any Q prime with bit_count >= 61.
+#   - gpu-fft-small-n.patch: adds Special_*Core_Small kernel pair so n_power
+#     in [4, 10] is supported on GPU; lets HEonGPU's sparse CKKS encoder run
+#     entirely on device for log_slots < 11.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/ApplyThirdpartyPatches.cmake)
+heongpu_apply_patch(
+    "${CMAKE_CURRENT_LIST_DIR}/cmake/patches/gpu-ntt-uint128-shift-cuda13.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/thirdparty/GPU-NTT"
+    HEONGPU_GPU_NTT_PATCHED_DIR)
+heongpu_apply_patch(
+    "${CMAKE_CURRENT_LIST_DIR}/cmake/patches/gpu-fft-small-n.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/thirdparty/GPU-FFT"
+    HEONGPU_GPU_FFT_PATCHED_DIR)
+
 add_subdirectory(thirdparty)
 add_subdirectory(src)
 

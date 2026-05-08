@@ -8,6 +8,32 @@
 namespace heongpu
 {
 
+// @company CipherFlow: thin wrapper packaging the gpufft::GPU_Special_FFT
+// configuration for sparse-encoding callers. GPU-FFT now supports n_power
+// in [4, 24] via the small-N kernel pair (Special_*Core_Small) so the
+// previous host-side fallback for log_slots < 11 is gone.
+static void special_ifft(Complex64* device_buf, int log_slots, double fix,
+                         Complex64* gpu_roots, cudaStream_t stream)
+{
+    gpufft::fft_configuration<Float64> cfg{};
+    cfg.n_power = log_slots;
+    cfg.fft_type = gpufft::type::INVERSE;
+    cfg.mod_inverse = Complex64(fix, 0.0);
+    cfg.stream = stream;
+    gpufft::GPU_Special_FFT(device_buf, gpu_roots, cfg, 1);
+}
+
+static void special_fft(Complex64* device_buf, int log_slots,
+                        Complex64* gpu_roots, cudaStream_t stream)
+{
+    gpufft::fft_configuration<Float64> cfg{};
+    cfg.n_power = log_slots;
+    cfg.fft_type = gpufft::type::FORWARD;
+    cfg.stream = stream;
+    gpufft::GPU_Special_FFT(device_buf, gpu_roots, cfg, 1);
+}
+
+
     __host__ HEEncoder<Scheme::CKKS>::HEEncoder(HEContext<Scheme::CKKS> context)
     {
         if (!context || !context->context_generated_)
@@ -121,22 +147,16 @@ namespace heongpu
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         DeviceVector<Complex64> temp_complex(slot_count_, stream); // @company CipherFlow
-        double_to_complex_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        double_to_complex_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(message_gpu.data(),
                                              temp_complex.data());
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(temp_complex.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(temp_complex.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), temp_complex.data(), context_->modulus_->data(),
             context_->Q_size, two_pow_64, reverse_order->data(), log_slot_n); // @company CipherFlow
@@ -192,22 +212,16 @@ namespace heongpu
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         DeviceVector<Complex64> temp_complex(slot_count_, stream); // @company CipherFlow
-        double_to_complex_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        double_to_complex_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(message_gpu.data(),
                                              temp_complex.data());
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(temp_complex.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(temp_complex.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), temp_complex.data(), context_->modulus_->data(),
             context_->Q_size, two_pow_64, reverse_order->data(), log_slot_n); // @company CipherFlow
@@ -346,16 +360,10 @@ namespace heongpu
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(message_gpu.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), message_gpu.data(), context_->modulus_->data(), context_->Q_size,
             two_pow_64, reverse_order->data(), log_slot_n); // @company CipherFlow
@@ -412,16 +420,10 @@ namespace heongpu
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(message_gpu.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), message_gpu.data(), context_->modulus_->data(), context_->Q_size,
             two_pow_64, reverse_order->data(), log_slot_n); // @company CipherFlow
@@ -517,22 +519,16 @@ namespace heongpu
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
         DeviceVector<Complex64> temp_complex(slot_count_, stream);
-        double_to_complex_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        double_to_complex_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(message_gpu.data(),
                                              temp_complex.data());
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(temp_complex.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(temp_complex.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), temp_complex.data(), context_->modulus_->data(),
             1, two_pow_64, reverse_order->data(), log_slot_n);
@@ -568,16 +564,10 @@ namespace heongpu
 
         double fix = scale / static_cast<double>(slot_count_);
 
-        gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_;
-        cfg_ifft.fft_type = gpufft::type::INVERSE;
-        cfg_ifft.mod_inverse = Complex64(fix, 0.0);
-        cfg_ifft.stream = stream;
+        special_ifft(message_gpu.data(), log_slot_count_, fix,
+                     special_ifft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
-
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_),
                                         0, stream>>>(
             output_memory.data(), message_gpu.data(), context_->modulus_->data(), 1,
             two_pow_64, reverse_order->data(), log_slot_n);
@@ -599,10 +589,14 @@ namespace heongpu
         int slot_n = 1 << log_slot_n; 
         int current_decomp_count = level + 1; 
 
-        DeviceVector<Data64> output_memory(slot_n * current_decomp_count, stream); 
+        DeviceVector<Data64> output_memory(slot_n * current_decomp_count, stream);
 
-        ringt_to_pt_kernel<<<dim3((slot_n >> 8), current_decomp_count, 1), 256,
-                             0, stream>>>(
+        // Collapse to single-block when slot_n < 256 so we don't launch a
+        // zero-block grid at small log_slots (slot_n = 2 << log_slot_count_).
+        const dim3 ringt_grid(slot_n < 256 ? 1u : (unsigned) (slot_n >> 8),
+                              (unsigned) current_decomp_count, 1);
+        const int ringt_block = slot_n < 256 ? slot_n : 256;
+        ringt_to_pt_kernel<<<ringt_grid, ringt_block, 0, stream>>>(
             plain_ringt.data(), output_memory.data(), context_->modulus_->data(),
             log_slot_n);
         HEONGPU_CUDA_CHECK(cudaGetLastError());
@@ -671,7 +665,7 @@ namespace heongpu
         }
 
         DeviceVector<Complex64> temp_complex(context_->n, stream);
-        encode_kernel_compose<<<dim3((slot_count_ >> 8), 1, 1), 256, 0,
+        encode_kernel_compose<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                 stream>>>(
             temp_complex.data(), temp_plain.data(), context_->modulus_->data(),
             context_->Mi_inv_->data() + location1,
@@ -682,15 +676,10 @@ namespace heongpu
             reverse_order->data(), context_->n_power, gap_); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        gpufft::fft_configuration<Float64> cfg_fft{};
-        cfg_fft.n_power = log_slot_count_;
-        cfg_fft.fft_type = gpufft::type::FORWARD;
-        cfg_fft.stream = stream;
+        special_fft(temp_complex.data(), log_slot_count_,
+                    special_fft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(temp_complex.data(),
-                                special_fft_roots_table_->data(), cfg_fft, 1);
-
-        complex_to_double_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        complex_to_double_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(temp_complex.data(),
                                              message_gpu.data());
 
@@ -740,7 +729,7 @@ namespace heongpu
 
         DeviceVector<Complex64> temp_complex(context_->n, stream);
 
-        encode_kernel_compose<<<dim3((slot_count_ >> 8), 1, 1), 256, 0,
+        encode_kernel_compose<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                 stream>>>(
             temp_complex.data(), temp_plain.data(), context_->modulus_->data(),
             context_->Mi_inv_->data() + location1,
@@ -751,15 +740,10 @@ namespace heongpu
             reverse_order->data(), context_->n_power, gap_); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        gpufft::fft_configuration<Float64> cfg_fft{};
-        cfg_fft.n_power = log_slot_count_;
-        cfg_fft.fft_type = gpufft::type::FORWARD;
-        cfg_fft.stream = stream;
+        special_fft(temp_complex.data(), log_slot_count_,
+                    special_fft_roots_table_->data(), stream);
 
-        gpufft::GPU_Special_FFT(temp_complex.data(),
-                                special_fft_roots_table_->data(), cfg_fft, 1);
-
-        complex_to_double_kernel<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0,
+        complex_to_double_kernel<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                    stream>>>(temp_complex.data(),
                                              message_gpu.data());
 
@@ -911,7 +895,7 @@ namespace heongpu
             counter--;
         }
 
-        encode_kernel_compose<<<dim3((slot_count_ >> 8), 1, 1), 256, 0,
+        encode_kernel_compose<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                 stream>>>(
             message_gpu.data(), temp_plain.data(), context_->modulus_->data(),
             context_->Mi_inv_->data() + location1,
@@ -922,13 +906,8 @@ namespace heongpu
             reverse_order->data(), context_->n_power, gap_); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        gpufft::fft_configuration<Float64> cfg_fft{};
-        cfg_fft.n_power = log_slot_count_;
-        cfg_fft.fft_type = gpufft::type::FORWARD;
-        cfg_fft.stream = stream;
-
-        gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_fft_roots_table_->data(), cfg_fft, 1);
+        special_fft(message_gpu.data(), log_slot_count_,
+                    special_fft_roots_table_->data(), stream);
 
         message.resize(slot_count_);
 
@@ -974,7 +953,7 @@ namespace heongpu
             counter--;
         }
 
-        encode_kernel_compose<<<dim3((slot_count_ >> 8), 1, 1), 256, 0,
+        encode_kernel_compose<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0,
                                 stream>>>(
             message_gpu.data(), temp_plain.data(), context_->modulus_->data(),
             context_->Mi_inv_->data() + location1,
@@ -985,13 +964,8 @@ namespace heongpu
             reverse_order->data(), context_->n_power, gap_); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
 
-        gpufft::fft_configuration<Float64> cfg_fft{};
-        cfg_fft.n_power = log_slot_count_;
-        cfg_fft.fft_type = gpufft::type::FORWARD;
-        cfg_fft.stream = stream;
-
-        gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_fft_roots_table_->data(), cfg_fft, 1);
+        special_fft(message_gpu.data(), log_slot_count_,
+                    special_fft_roots_table_->data(), stream);
 
         message.resize(slot_count_);
 
@@ -1042,7 +1016,7 @@ namespace heongpu
             bit_rev[i] = gpuntt::bitreverse(i, log_slot_count);
         DeviceVector<int> reverse_order_local(bit_rev, stream);
 
-        encode_kernel_ckks_conversion<<<dim3((slot_count >> 8), 1, 1), 256,
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count), slot_kernel_block(slot_count),
                                         0, stream>>>(
             output_memory.data(), message_gpu.data(), context_->modulus_->data(), context_->Q_size,
             two_pow_64, reverse_order_local.data(), log_slot_n);
@@ -1122,7 +1096,7 @@ namespace heongpu
             bit_rev[i] = gpuntt::bitreverse(i, log_slot_count);
         DeviceVector<int> reverse_order_local(bit_rev, stream);
 
-        encode_kernel_compose<<<dim3((slot_count >> 8), 1, 1), 256, 0, stream>>>(
+        encode_kernel_compose<<<slot_kernel_grid(slot_count), slot_kernel_block(slot_count), 0, stream>>>(
             message_gpu.data(), temp_plain.data(), context_->modulus_->data(),
             context_->Mi_inv_->data() + location1, context_->Mi_->data() + location2,
             context_->upper_half_threshold_->data() + location1,

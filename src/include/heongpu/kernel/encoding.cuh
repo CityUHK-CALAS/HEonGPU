@@ -14,6 +14,20 @@
 namespace heongpu
 {
 
+    // @company CipherFlow: launch dims for per-slot encoder kernels (one
+    // thread per slot). The default block of 256 produces a zero-block grid
+    // when slot_count < 256 (sparse log_slots < 8), which CUDA rejects
+    // ("invalid argument"). Collapse to a single block in that case so the
+    // kernels run for any power-of-two slot_count >= 1.
+    inline dim3 slot_kernel_grid(int slot_count)
+    {
+        return slot_count < 256 ? dim3(1, 1, 1) : dim3(slot_count >> 8, 1, 1);
+    }
+    inline int slot_kernel_block(int slot_count)
+    {
+        return slot_count < 256 ? slot_count : 256;
+    }
+
     __global__ void encode_kernel_bfv(Data64* message_encoded, Data64* message,
                                       Data64* location_info,
                                       Modulus64* plain_mod, int message_size);

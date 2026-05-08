@@ -97,6 +97,13 @@ namespace heongpu
         {
         }
 
+        EvalModConfig(int level_start)
+            : sine_deg_(30), double_angle_(3), arcsine_deg_(0),
+              level_start_(level_start), K_(16), message_ratio_(256.0), Q_(0),
+              scaling_factor_(0.0)
+        {
+        }
+
         EvalModConfig(Data64 Q, int level_start, double message_ratio, int K,
                       int sine_deg, int double_angle, int arcsine_deg,
                       double scaling_factor)

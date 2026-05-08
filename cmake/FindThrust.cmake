@@ -1,4 +1,11 @@
 # Locate Thrust library and set THRUST_INCLUDE_DIR
+#
+# Supports both pre-CUDA-13 and CUDA 13+ layouts:
+#   - Pre-13: <cuda>/include/thrust/version.h
+#   - CUDA 13+: <cuda>/include/cccl/thrust/version.h
+#             (NVIDIA consolidated Thrust/CUB/libcu++ under cccl/)
+
+find_package(CUDAToolkit QUIET)
 
 find_path(THRUST_INCLUDE_DIR
   NAMES thrust/version.h
@@ -9,6 +16,14 @@ find_path(THRUST_INCLUDE_DIR
     ${CUDA_INCLUDE_DIRS}
     ${CUDA_TOOLKIT_ROOT_DIR}
     ${CUDA_SDK_ROOT_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${CUDAToolkit_TARGET_DIR}
+  PATH_SUFFIXES
+    cccl
+    include
+    include/cccl
+    targets/x86_64-linux/include
+    targets/x86_64-linux/include/cccl
 )
 
 if (THRUST_INCLUDE_DIR)

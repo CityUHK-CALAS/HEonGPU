@@ -2822,18 +2822,18 @@ namespace heongpu
         int gap = context_->n >> (log_slot_count_local + 1);
         // @company CipherFlow end ---
 
-        double fix = scale / static_cast<double>(slot_count); // @company CipherFlow 
+        double fix = scale / static_cast<double>(slot_count); // @company CipherFlow
 
+        // GPU-FFT now supports n_power in [4, 24] via the small-N kernel.
         gpufft::fft_configuration<Float64> cfg_ifft{};
-        cfg_ifft.n_power = log_slot_count_local; // @company CipherFlow 
+        cfg_ifft.n_power = log_slot_count_local;
         cfg_ifft.fft_type = gpufft::type::INVERSE;
         cfg_ifft.mod_inverse = Complex64(fix, 0.0);
         cfg_ifft.stream = 0;
-
         gpufft::GPU_Special_FFT(input, special_ifft_roots_table_->data(),
                                 cfg_ifft, 1);
 
-        // @company CipherFlow 
+        // @company CipherFlow
         // Generate bit-reverse table for the requested slot_count.
         std::vector<int> bit_rev(slot_count);
         for (int i = 0; i < slot_count; i++)
@@ -2850,7 +2850,7 @@ namespace heongpu
             compact = compact_buf.data();
         }
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count) >> 8), 1, 1), 256>>>(
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count), slot_kernel_block(slot_count)>>>(
             compact, input, context_->modulus_->data(), rns_count, two_pow_64_,
             reverse_order_local.data(), log_sparse_n); // @company CipherFlow 
         HEONGPU_CUDA_CHECK(cudaGetLastError());
@@ -2900,9 +2900,9 @@ namespace heongpu
         cfg_ifft.fft_type = gpufft::type::INVERSE;
         cfg_ifft.mod_inverse = Complex64(fix, 0.0);
         cfg_ifft.stream = stream; // @company CipherFlow
-
         gpufft::GPU_Special_FFT(message_gpu.data(),
-                                special_ifft_roots_table_->data(), cfg_ifft, 1);
+                                special_ifft_roots_table_->data(),
+                                cfg_ifft, 1);
 
         int log_sparse_n = log_slot_count_ + 1; // @company CipherFlow
 
@@ -2916,7 +2916,7 @@ namespace heongpu
             compact = compact_buf.data();
         }
 
-        encode_kernel_ckks_conversion<<<dim3(((slot_count_) >> 8), 1, 1), 256, 0, stream>>>( // @company CipherFlow
+        encode_kernel_ckks_conversion<<<slot_kernel_grid(slot_count_), slot_kernel_block(slot_count_), 0, stream>>>( // @company CipherFlow
             compact, message_gpu.data(), context_->modulus_->data(), context_->Q_size, two_pow_64_,
             reverse_order_->data(), log_sparse_n); // @company CipherFlow
         HEONGPU_CUDA_CHECK(cudaGetLastError());
@@ -8162,6 +8162,20 @@ namespace heongpu
     {
         if (!boot_context_generated_)
         {
+            // Sparse bootstrap relies on VandermondeCF being built from the
+            // encoder's slot_count_; log_slots <= 1 collapses BSGS vectors and
+            // dereferences NULL inside E_diagonal_matrix_mult_kernel_cf, and
+            // log_slots > log_n - 1 is incoherent with the polynomial degree.
+            const int log_n =
+                static_cast<int>(__builtin_ctz(context_->n));
+            if (log_slot_count_ < 2 || log_slot_count_ > log_n - 1)
+            {
+                throw std::invalid_argument(
+                    "bootstrap requires log_slots in [2, log_n - 1]; got "
+                    "log_slots=" +
+                    std::to_string(log_slot_count_));
+            }
+
             scale_boot_ = scale;
             CtoS_piece_ = config.CtoS_piece_;
             StoC_piece_ = config.StoC_piece_;
